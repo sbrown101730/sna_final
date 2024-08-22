@@ -1,5 +1,5 @@
 ---
-title: "askreddit_ergm"
+title: "todayilearned_ergm"
 author: "Katie Lam"
 date: today 
 format: html
@@ -55,28 +55,28 @@ popularity_large <- read_csv("data/subreddits_public.csv")
 popularity_clean <- popularity_large %>%
   mutate(subreddit_name = str_to_lower(subreddit_name))
 
-# find all subreddits with "askreddit" as source or target
-askreddit_1 <- hyperlink_large %>%
+# find all subreddits with "todayilearned" as source or target
+todayilearned_1 <- hyperlink_large %>%
   janitor::clean_names() %>%
-  filter(source_subreddit == "askreddit" | target_subreddit == "askreddit")
+  filter(source_subreddit == "todayilearned" | target_subreddit == "todayilearned")
   
-# 2 layer: find all links from subreddits related to "askreddit"
-askreddit_2 <- hyperlink_large %>%
+# 2 layer: find all links from subreddits related to "todayilearned"
+todayilearned_2 <- hyperlink_large %>%
   janitor::clean_names() %>%
-  filter(source_subreddit %in% askreddit_1$source_subreddit | 
-           target_subreddit %in% askreddit_1$target_subreddit |
-           source_subreddit %in% askreddit_1$target_subreddit |
-           target_subreddit %in% askreddit_1$source_subreddit)
+  filter(source_subreddit %in% todayilearned_1$source_subreddit | 
+           target_subreddit %in% todayilearned_1$target_subreddit |
+           source_subreddit %in% todayilearned_1$target_subreddit |
+           target_subreddit %in% todayilearned_1$source_subreddit)
   
 # count # of links <- take only n > 35
-askreddit_3 <- askreddit_2 %>%
+todayilearned_3 <- todayilearned_2 %>%
   count(source_subreddit, target_subreddit) %>%
   filter(n > 35)
 
 # clean popularity file
 popularity <- popularity_clean %>%
-  filter(subreddit_name %in% askreddit_3$source_subreddit | 
-           subreddit_name %in% askreddit_3$target_subreddit) %>%
+  filter(subreddit_name %in% todayilearned_3$source_subreddit | 
+           subreddit_name %in% todayilearned_3$target_subreddit) %>%
   select(subreddit_name, subscribers_count) %>%
   mutate(
     subscribers_count = as.numeric(subscribers_count),
@@ -104,19 +104,19 @@ popularity <- popularity_clean %>%
 #| output: false
 #| message: false
 
-head(askreddit_3)
+head(todayilearned_3)
 
 # Convert the edgelist to a network object in statnet format:
-askreddit_net <- as.network.matrix(askreddit_3, matrix.type = "edgelist") 
+todayilearned_net <- as.network.matrix(todayilearned_3, matrix.type = "edgelist") 
 
-plot(askreddit_net)
+plot(todayilearned_net)
 # 
-askreddit_net |>
+todayilearned_net |>
   network::set.vertex.attribute("size", value = popularity$size)
 
-network::get.vertex.attribute(askreddit_net,"vertex.names")
+network::get.vertex.attribute(todayilearned_net,"vertex.names")
 
-network::get.vertex.attribute(askreddit_net,"size")
+network::get.vertex.attribute(todayilearned_net,"size")
 
 ```
 
@@ -133,13 +133,13 @@ igraph_options(vertex.size = 2, vertex.color = 'grey',
                vertex.label = NA)                       
 
 # make an igraph network object from statnet network object
-askreddit_igraph <- graph.adjacency(as.matrix.network(askreddit_net)) 
+todayilearned_igraph <- graph.adjacency(as.matrix.network(todayilearned_net)) 
 
 # set vertex attribute for size
-askreddit_igraph <- set_vertex_attr(askreddit_igraph, "popularity", value = network::get.vertex.attribute(askreddit_net,"size"))
+todayilearned_igraph <- set_vertex_attr(todayilearned_igraph, "popularity", value = network::get.vertex.attribute(todayilearned_net,"size"))
 
 # count components
-count_components(askreddit_igraph)
+count_components(todayilearned_igraph)
 
 
 ```
@@ -149,17 +149,17 @@ count_components(askreddit_igraph)
 ```{r}
 #| label: giant component
 
-reddit_comp <- igraph::components(askreddit_igraph)
-giantGraph_askreddit <- askreddit_igraph %>%
+reddit_comp <- igraph::components(todayilearned_igraph)
+giantGraph_todayilearned <- todayilearned_igraph %>%
   induced_subgraph(., which(reddit_comp$membership == which.max(reddit_comp$csize)))
 
-plot(giantGraph_askreddit)
+plot(giantGraph_todayilearned)
 
 library(intergraph)
 
-askreddit_giant <- asNetwork(giantGraph_askreddit)
+todayilearned_giant <- asNetwork(giantGraph_todayilearned)
 
-askreddit_giant
+todayilearned_giant
 # vcount(gpt_graph) ## the number of nodes/actors/users
 # ecount(gpt_graph) ## the number of edges
 ```
@@ -173,18 +173,18 @@ library(statnet)
 options(ergm.loglik.warn_dyads=FALSE) 
 
 # Look at Endogenous statistics: terms based on only ties in the advice network
-summary(askreddit_giant ~ edges)                     # Number of edges (ties)
-summary(askreddit_giant ~ mutual)                    # Number of pairs of reciprocated ties
+summary(todayilearned_giant ~ edges)                     # Number of edges (ties)
+summary(todayilearned_giant ~ mutual)                    # Number of pairs of reciprocated ties
 
-summary(askreddit_giant ~ idegree(0:65))             # Indegree distribution.
-summary(askreddit_giant ~ gwodegree(log(2),fixed=T)) # One parameter summarizing outdegree distribution - tendency against outdegree hubs
-summary(askreddit_giant ~ gwidegree(log(2),fixed=T)) # One parameters summarizing indegree distribution - tendency against indegree hubs
-summary(askreddit_giant ~ desp(1:5))  
+summary(todayilearned_giant ~ idegree(0:65))             # Indegree distribution.
+summary(todayilearned_giant ~ gwodegree(log(2),fixed=T)) # One parameter summarizing outdegree distribution - tendency against outdegree hubs
+summary(todayilearned_giant ~ gwidegree(log(2),fixed=T)) # One parameters summarizing indegree distribution - tendency against indegree hubs
+summary(todayilearned_giant ~ desp(1:5))  
 
-askreddit_giant
+todayilearned_giant
 
 # remove missing
-summary(askreddit_giant ~ nodematch("popularity", levels = -3, diff = TRUE)) 
+summary(todayilearned_giant ~ nodematch("popularity", levels = -3, diff = TRUE)) 
 ```
 
 ### fit model 1
@@ -195,7 +195,7 @@ summary(askreddit_giant ~ nodematch("popularity", levels = -3, diff = TRUE))
 
 ## 2. Subreddits are likely to have reciprocal ties 
 
-## 3. Subreddits have a preferential indegree attachement --> want to determine whether askreddit is a hub or an authority node.
+## 3. Subreddits have a preferential indegree attachement --> want to determine whether todayilearned is a hub or an authority node.
 
 ## 4. Subreddits have a tendency to form more ties based on subreddits with the same size.
 
@@ -203,7 +203,7 @@ summary(askreddit_giant ~ nodematch("popularity", levels = -3, diff = TRUE))
 #| message: false
 # The following commands do model estimation for ERGMs.
 # This may take a second. Text will print in-console to update you on progress in model estimation.
-model1 <- ergm(askreddit_giant ~ edges
+model1 <- ergm(todayilearned_giant ~ edges
                + mutual 
                + gwidegree(log(2),fixed=T)
                + nodematch("popularity", levels = -3)
@@ -256,7 +256,7 @@ b.  Extract the number of triangles from each of the 100 samples.
 # Model 1:
 model1.tridist <- sapply(1:100, function(x) summary(sim1[[x]] ~triangle)) # Extracts the triangle data from the simulated networks
 hist(model1.tridist,xlim=c(0,1000),breaks=10)                             # Plots that triangle distribution as a histogram, change xlim to change the x-axis range if necessary
-advice.tri <- summary(askreddit_net ~ triangle)                                    # Stores the number of observed triangles
+advice.tri <- summary(todayilearned_net ~ triangle)                                    # Stores the number of observed triangles
 advice.tri
 arrows(advice.tri,20, advice.tri, 0.5, col="red", lwd=3)                      # Adds an arrow to the plotted histogram
 c(obs=advice.tri,mean=mean(model1.tridist),sd=sd(model1.tridist),
