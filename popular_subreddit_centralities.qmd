@@ -1,0 +1,46 @@
+---
+title: "popular_subreddit_centralities"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+# load packages
+
+list.of.packages <- c("robustbase","igraph","statnet", "kableExtra", "poweRlaw")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+# You need to load packages every time you run the script or restart R.
+library(dplyr)
+library(igraph)
+library(ggplot2)
+library(poweRlaw)
+library(readr)
+library(tidyverse)
+
+```
+
+```{r}
+# load data
+
+# read hyperlinks tsv
+hyperlink_large <- read_tsv("data/soc-redditHyperlinks-body.tsv") %>%
+  janitor::clean_names() %>%
+  select(source_subreddit, target_subreddit)
+
+# read subscriber count csv
+popularity_large <- read_csv("data/subreddits_public.csv") %>%
+  janitor::clean_names() %>%
+  mutate(
+    subreddit_name = str_to_lower(subreddit_name),
+    subscribers_count = as.numeric(subscribers_count)
+  ) %>%
+  arrange(desc(subscribers_count)) %>%
+  slice(1:5)
+
+
+```
+

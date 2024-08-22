@@ -5,11 +5,6 @@ editor: visual
 ---
 
 ```{r}
-# blad
-```
-
-
-```{r}
 #| echo: false
 #| output: false
 #| message: false
