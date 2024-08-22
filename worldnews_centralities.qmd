@@ -1,0 +1,296 @@
+---
+title: "worldnews_centralities"
+author: "Siya Brown"
+date: today 
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+## Load packages
+
+```{r}
+#| echo: true
+#| output: false
+#| message: false
+
+rm(list=ls())
+
+# Clear your environment
+rm(list=ls())
+
+# Install packages below if you do not have them:
+# -------------------------------------------------
+if (!"statnet" %in% installed.packages()) install.packages("statnet") # For fitting ERGMs
+if (!"igraph" %in% installed.packages()) install.packages("igraph") # For network plotting
+if (!"texreg" %in% installed.packages()) install.packages("texreg") # For printing "nicer" model output
+
+library(statnet)
+library(readr)
+
+list.files() # List the files in the current working directory to see if you're in the right directory
+
+```
+
+
+## Load data
+
+```{r}
+#| echo: true
+#| output: false
+#| message: false
+#| label: load data
+
+library(dplyr) 
+library(tidyverse)
+
+# read hyperlink tsv file
+hyperlink_large <- read_tsv("data/soc-redditHyperlinks-body.tsv") %>%
+  janitor::clean_names() %>%
+  select(source_subreddit, target_subreddit)
+
+# read popularity csv file
+popularity_large <- read_csv("data/subreddits_public.csv")
+
+popularity_clean <- popularity_large %>%
+  mutate(subreddit_name = str_to_lower(subreddit_name))
+
+# find all subreddits with "worldnews" as source or target
+worldnews_1 <- hyperlink_large %>%
+  janitor::clean_names() %>%
+  filter(source_subreddit == "worldnews" | target_subreddit == "worldnews")
+  
+# 2 layer: find all links from subreddits related to "worldnews"
+worldnews_2 <- hyperlink_large %>%
+  janitor::clean_names() %>%
+  filter(source_subreddit %in% worldnews_1$source_subreddit | 
+           target_subreddit %in% worldnews_1$target_subreddit |
+           source_subreddit %in% worldnews_1$target_subreddit |
+           target_subreddit %in% worldnews_1$source_subreddit)
+  
+# count # of links <- take only n > 35
+worldnews_3 <- worldnews_2 %>%
+  count(source_subreddit, target_subreddit) %>%
+  filter(n > 35)
+
+# clean popularity file
+popularity <- popularity_clean %>%
+  filter(subreddit_name %in% worldnews_3$source_subreddit | 
+           subreddit_name %in% worldnews_3$target_subreddit) %>%
+  select(subreddit_name, subscribers_count) %>%
+  mutate(
+    subscribers_count = as.numeric(subscribers_count),
+    
+    # categorical variable determining size of subreddit
+    size = case_when(
+      subscribers_count <= 10000 ~ "small",
+      subscribers_count <= 50000 ~ "medium",
+      subscribers_count > 50000 ~ "large"
+    ),
+    # deal with NA values
+    size = size %>% 
+      replace_na("missing")
+  ) %>% 
+  arrange(subreddit_name)
+
+
+```
+
+
+## make network
+
+```{r}
+#| echo: true
+#| output: false
+#| message: false
+
+head(worldnews_3)
+
+# Convert the edgelist to a network object in statnet format:
+worldnews_net <- as.network.matrix(worldnews_3, matrix.type = "edgelist") 
+
+plot(worldnews_net)
+# 
+worldnews_net |>
+  network::set.vertex.attribute("size", value = popularity$size)
+
+network::get.vertex.attribute(worldnews_net,"vertex.names")
+
+network::get.vertex.attribute(worldnews_net,"size")
+
+```
+
+
+## make igraph object
+
+```{r}
+
+library('igraph') # Ignore messages on any objects that are masked
+
+# Set default plot options
+igraph_options(vertex.size = 2, vertex.color = 'grey',
+               edge.color='gray80', edge.arrow.size=.1,
+               vertex.label = NA)                       
+
+# make an igraph network object from statnet network object
+worldnews_igraph <- graph.adjacency(as.matrix.network(worldnews_net)) 
+
+# set vertex attribute for size
+worldnews_igraph <- set_vertex_attr(worldnews_igraph, "popularity", value = network::get.vertex.attribute(worldnews_net,"size"))
+
+# count components
+count_components(worldnews_igraph)
+
+
+```
+
+## calculate centralities
+
+```{r}
+#| label: degree centralities 
+
+# Calculate in-degree centrality (number of incoming edges)
+V(worldnews_igraph)$in_degree <- degree(worldnews_igraph, mode = "in")
+
+# Calculate out-degree centrality (number of outgoing edges)
+V(worldnews_igraph)$out_degree <- degree(worldnews_igraph, mode = "out")
+
+# Calculate total degree centrality (sum of in-degree and out-degree)
+V(worldnews_igraph)$total_degree <- degree(worldnews_igraph, mode = "all")
+
+# Display the top 10 nodes by in-degree
+top_in_degree <- data.frame(node_name = V(worldnews_igraph)$name, in_degree = V(worldnews_igraph)$in_degree) |> 
+  dplyr::slice_max(order_by = in_degree, n = 10) |> 
+  kableExtra::kable()
+
+top_in_degree
+
+# Display the top 10 nodes by out-degree
+top_out_degree <- data.frame(node_name = V(worldnews_igraph)$name, out_degree = V(worldnews_igraph)$out_degree) |> 
+  dplyr::slice_max(order_by = out_degree, n = 10) |> 
+  kableExtra::kable()
+
+top_out_degree
+
+# Display the top 10 nodes by total degree
+top_total_degree <- data.frame(node_name = V(worldnews_igraph)$name, total_degree = V(worldnews_igraph)$total_degree) |> 
+  dplyr::slice_max(order_by = total_degree, n = 10) |> 
+  kableExtra::kable()
+
+top_total_degree
+```
+
+
+## betweenness
+
+```{r}
+#| label: betweenness centralities 
+
+# Calculate betweenness centrality
+V(worldnews_igraph)$betweenness <- betweenness(worldnews_igraph, directed = TRUE)
+
+# Top 10 nodes by betweenness centrality
+top_betweenness <- data.frame(node_name = V(worldnews_igraph)$name, betweenness = V(worldnews_igraph)$betweenness) |> 
+  dplyr::slice_max(order_by = betweenness, n = 10) |> 
+  kableExtra::kable()
+
+top_betweenness
+```
+
+## closeness
+
+```{r}
+#| label: closeness centralities 
+
+# Calculate closeness centrality (outgoing paths)
+V(worldnews_igraph)$closeness <- closeness(worldnews_igraph, mode = "out")
+
+# Top 10 nodes by closeness centrality
+top_closeness <- data.frame(node_name = V(worldnews_igraph)$name, closeness = V(worldnews_igraph)$closeness) |> 
+  dplyr::slice_max(order_by = closeness, n = 10) |> 
+  kableExtra::kable()
+
+top_closeness
+```
+
+## eigenvector
+
+```{r}
+#| label: eigenvector centrality
+
+# Calculate eigenvector centrality
+V(worldnews_igraph)$eigenvector <- eigen_centrality(worldnews_igraph, directed = TRUE)$vector
+
+# Top 10 nodes by eigenvector centrality
+top_eigenvector <- data.frame(node_name = V(worldnews_igraph)$name, eigenvector = V(worldnews_igraph)$eigenvector) |> 
+  dplyr::slice_max(order_by = eigenvector, n = 10) |> 
+  kableExtra::kable()
+
+top_eigenvector
+```
+
+## k-core 
+
+```{r}
+#| label: k-core calculations and plot
+
+# Calculate k-core decomposition
+V(worldnews_igraph)$kcore <- coreness(worldnews_igraph)
+
+# Plot the k-core decomposition results
+plot(worldnews_igraph,
+     vertex.size = V(worldnews_igraph)$kcore * 3,  # Size proportional to k-core
+     vertex.color = adjustcolor(V(worldnews_igraph)$kcore, alpha.f = .3),
+     vertex.label = NA,
+     edge.arrow.size = 0.3,
+     main = "K-core Decomposition of r/worldnews Network")
+
+```
+
+## community dectection
+
+```{r}
+#| label: community detection
+
+# Detect communities using the edge betweenness method
+worldnews_communities <- cluster_edge_betweenness(worldnews_igraph)
+
+# View the membership of nodes to communities
+membership(worldnews_communities)
+
+# Number of communities detected
+num_communities <- length(worldnews_communities)
+num_communities
+
+# Size of each community
+community_sizes <- sizes(worldnews_communities)
+community_sizes
+```
+
+## modularity
+
+```{r}
+#| label: community modularity
+
+# Calculate modularity of the detected communities
+modularity_score <- modularity(worldnews_communities)
+modularity_score
+
+# Interpretation of modularity score
+
+# the score is 0.5528658
+```
+
+## visualize communities 
+
+```{r}
+#| label: community vis
+
+# Plot the network with communities highlighted
+plot(worldnews_communities, worldnews_igraph,
+     vertex.size = V(worldnews_igraph)$kcore * 3,
+     vertex.label = NA,
+     edge.arrow.size = 0.3,
+     main = "Community Detection in r/worldnews Network")
+```
+
