@@ -45,5 +45,3 @@ top_5 <- popularity_large %>%
   select(subreddit_name, subscribers_count)
 
 ```
-
-
