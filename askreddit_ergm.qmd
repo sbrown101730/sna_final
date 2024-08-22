@@ -153,7 +153,10 @@ reddit_comp <- igraph::components(askreddit_igraph)
 giantGraph_askreddit <- askreddit_igraph %>%
   induced_subgraph(., which(reddit_comp$membership == which.max(reddit_comp$csize)))
 
-plot(giantGraph_askreddit)
+V(giantGraph_askreddit)$popularity_numeric <- as.numeric(factor(V(giantGraph_askreddit)$popularity, levels = c("missing", "small", "medium", "large")))
+
+plot(giantGraph_askreddit, vertex.size = V(giantGraph_askreddit)$popularity_numeric, vertex.color = "lightblue", edge.color = "darkblue")
+
 
 library(intergraph)
 
@@ -206,7 +209,9 @@ summary(askreddit_giant ~ nodematch("popularity", levels = -3, diff = TRUE))
 model1 <- ergm(askreddit_giant ~ edges
                + mutual 
                + gwidegree(log(2),fixed=T)
+               #+ gwodegree(log(2),fixed=T)
                + nodematch("popularity", levels = -3)
+               + nodemix("popularity", levels = -3)
                
                , control = control.ergm(seed = 42)
                , verbose = F

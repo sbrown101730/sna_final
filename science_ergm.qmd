@@ -207,6 +207,7 @@ model1 <- ergm(science_giant ~ edges
                + mutual 
                + gwidegree(log(2),fixed=T)
                + nodematch("popularity", levels = -3)
+               + nodemix("popularity", levels = -3)
                
                , control = control.ergm(seed = 42)
                , verbose = F

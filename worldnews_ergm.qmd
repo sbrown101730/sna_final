@@ -1,5 +1,5 @@
 ---
-title: "funny_ergm"
+title: "worldnews_ergm"
 author: "Katie Lam"
 date: today 
 format: html
@@ -55,28 +55,28 @@ popularity_large <- read_csv("data/subreddits_public.csv")
 popularity_clean <- popularity_large %>%
   mutate(subreddit_name = str_to_lower(subreddit_name))
 
-# find all subreddits with "funny" as source or target
-funny_1 <- hyperlink_large %>%
+# find all subreddits with "worldnews" as source or target
+worldnews_1 <- hyperlink_large %>%
   janitor::clean_names() %>%
-  filter(source_subreddit == "funny" | target_subreddit == "funny")
+  filter(source_subreddit == "worldnews" | target_subreddit == "worldnews")
   
-# 2 layer: find all links from subreddits related to "funny"
-funny_2 <- hyperlink_large %>%
+# 2 layer: find all links from subreddits related to "worldnews"
+worldnews_2 <- hyperlink_large %>%
   janitor::clean_names() %>%
-  filter(source_subreddit %in% funny_1$source_subreddit | 
-           target_subreddit %in% funny_1$target_subreddit |
-           source_subreddit %in% funny_1$target_subreddit |
-           target_subreddit %in% funny_1$source_subreddit)
+  filter(source_subreddit %in% worldnews_1$source_subreddit | 
+           target_subreddit %in% worldnews_1$target_subreddit |
+           source_subreddit %in% worldnews_1$target_subreddit |
+           target_subreddit %in% worldnews_1$source_subreddit)
   
 # count # of links <- take only n > 35
-funny_3 <- funny_2 %>%
+worldnews_3 <- worldnews_2 %>%
   count(source_subreddit, target_subreddit) %>%
   filter(n > 35)
 
 # clean popularity file
 popularity <- popularity_clean %>%
-  filter(subreddit_name %in% funny_3$source_subreddit | 
-           subreddit_name %in% funny_3$target_subreddit) %>%
+  filter(subreddit_name %in% worldnews_3$source_subreddit | 
+           subreddit_name %in% worldnews_3$target_subreddit) %>%
   select(subreddit_name, subscribers_count) %>%
   mutate(
     subscribers_count = as.numeric(subscribers_count),
@@ -104,22 +104,19 @@ popularity <- popularity_clean %>%
 #| output: false
 #| message: false
 
-head(funny_3)
+head(worldnews_3)
 
 # Convert the edgelist to a network object in statnet format:
-funny_net <- as.network.matrix(funny_3, matrix.type = "edgelist") 
+worldnews_net <- as.network.matrix(worldnews_3, matrix.type = "edgelist") 
 
-plot(funny_net)
+plot(worldnews_net)
 # 
-funny_net |>
+worldnews_net |>
   network::set.vertex.attribute("size", value = popularity$size)
 
-funny_net |>
-  network::set.vertex.attribute("subs", value = popularity$subscribers_count)
+network::get.vertex.attribute(worldnews_net,"vertex.names")
 
-network::get.vertex.attribute(funny_net,"vertex.names")
-
-network::get.vertex.attribute(funny_net,"size")
+network::get.vertex.attribute(worldnews_net,"size")
 
 ```
 
@@ -136,15 +133,13 @@ igraph_options(vertex.size = 2, vertex.color = 'grey',
                vertex.label = NA)                       
 
 # make an igraph network object from statnet network object
-funny_igraph <- graph.adjacency(as.matrix.network(funny_net)) 
+worldnews_igraph <- graph.adjacency(as.matrix.network(worldnews_net)) 
 
 # set vertex attribute for size
-funny_igraph <- set_vertex_attr(funny_igraph, "popularity", value = network::get.vertex.attribute(funny_net,"size"))
-
-funny_igraph <- set_vertex_attr(funny_igraph, "subs", value = network::get.vertex.attribute(funny_net,"subs"))
+worldnews_igraph <- set_vertex_attr(worldnews_igraph, "popularity", value = network::get.vertex.attribute(worldnews_net,"size"))
 
 # count components
-count_components(funny_igraph)
+count_components(worldnews_igraph)
 
 
 ```
@@ -154,17 +149,20 @@ count_components(funny_igraph)
 ```{r}
 #| label: giant component
 
-reddit_comp <- igraph::components(funny_igraph)
-giantGraph_funny <- funny_igraph %>%
+reddit_comp <- igraph::components(worldnews_igraph)
+giantGraph_worldnews <- worldnews_igraph %>%
   induced_subgraph(., which(reddit_comp$membership == which.max(reddit_comp$csize)))
 
-plot(giantGraph_funny)
+V(giantGraph_worldnews)$popularity_numeric <- as.numeric(factor(V(giantGraph_worldnews)$popularity, levels = c("missing", "small", "medium", "large")))
+
+plot(giantGraph_worldnews, vertex.size = V(giantGraph_worldnews)$popularity_numeric, vertex.color = "lightblue", edge.color = "darkblue")
+
 
 library(intergraph)
 
-funny_giant <- asNetwork(giantGraph_funny)
+worldnews_giant <- asNetwork(giantGraph_worldnews)
 
-funny_giant
+worldnews_giant
 # vcount(gpt_graph) ## the number of nodes/actors/users
 # ecount(gpt_graph) ## the number of edges
 ```
@@ -178,18 +176,18 @@ library(statnet)
 options(ergm.loglik.warn_dyads=FALSE) 
 
 # Look at Endogenous statistics: terms based on only ties in the advice network
-summary(funny_giant ~ edges)                     # Number of edges (ties)
-summary(funny_giant ~ mutual)                    # Number of pairs of reciprocated ties
+summary(worldnews_giant ~ edges)                     # Number of edges (ties)
+summary(worldnews_giant ~ mutual)                    # Number of pairs of reciprocated ties
 
-summary(funny_giant ~ idegree(0:65))             # Indegree distribution.
-summary(funny_giant ~ gwodegree(log(2),fixed=T)) # One parameter summarizing outdegree distribution - tendency against outdegree hubs
-summary(funny_giant ~ gwidegree(log(2),fixed=T)) # One parameters summarizing indegree distribution - tendency against indegree hubs
-summary(funny_giant ~ desp(1:5))  
+summary(worldnews_giant ~ idegree(0:65))             # Indegree distribution.
+summary(worldnews_giant ~ gwodegree(log(2),fixed=T)) # One parameter summarizing outdegree distribution - tendency against outdegree hubs
+summary(worldnews_giant ~ gwidegree(log(2),fixed=T)) # One parameters summarizing indegree distribution - tendency against indegree hubs
+summary(worldnews_giant ~ desp(1:5))  
 
-funny_giant
+worldnews_giant
 
 # remove missing
-summary(funny_giant ~ nodematch("popularity", levels = -3, diff = TRUE)) 
+summary(worldnews_giant ~ nodematch("popularity", levels = -3, diff = TRUE)) 
 ```
 
 ### fit model 1
@@ -200,7 +198,7 @@ summary(funny_giant ~ nodematch("popularity", levels = -3, diff = TRUE))
 
 ## 2. Subreddits are likely to have reciprocal ties 
 
-## 3. Subreddits have a preferential indegree attachement --> want to determine whether funny is a hub or an authority node.
+## 3. Subreddits have a preferential indegree attachement --> want to determine whether worldnews is a hub or an authority node.
 
 ## 4. Subreddits have a tendency to form more ties based on subreddits with the same size.
 
@@ -208,9 +206,10 @@ summary(funny_giant ~ nodematch("popularity", levels = -3, diff = TRUE))
 #| message: false
 # The following commands do model estimation for ERGMs.
 # This may take a second. Text will print in-console to update you on progress in model estimation.
-model1 <- ergm(funny_giant ~ edges
+model1 <- ergm(worldnews_giant ~ edges
                + mutual 
                + gwidegree(log(2),fixed=T)
+               #+ gwodegree(log(2),fixed=T)
                + nodematch("popularity", levels = -3)
                + nodemix("popularity", levels = -3)
                
@@ -220,7 +219,7 @@ model1 <- ergm(funny_giant ~ edges
 summary(model1)
 
 ```
- 
+
 # display results of model 1
 ```{r}
 
@@ -262,7 +261,7 @@ b.  Extract the number of triangles from each of the 100 samples.
 # Model 1:
 model1.tridist <- sapply(1:100, function(x) summary(sim1[[x]] ~triangle)) # Extracts the triangle data from the simulated networks
 hist(model1.tridist,xlim=c(0,1000),breaks=10)                             # Plots that triangle distribution as a histogram, change xlim to change the x-axis range if necessary
-advice.tri <- summary(funny_net ~ triangle)                                    # Stores the number of observed triangles
+advice.tri <- summary(worldnews_net ~ triangle)                                    # Stores the number of observed triangles
 advice.tri
 arrows(advice.tri,20, advice.tri, 0.5, col="red", lwd=3)                      # Adds an arrow to the plotted histogram
 c(obs=advice.tri,mean=mean(model1.tridist),sd=sd(model1.tridist),
