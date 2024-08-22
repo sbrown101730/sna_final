@@ -37,10 +37,12 @@ popularity_large <- read_csv("data/subreddits_public.csv") %>%
   mutate(
     subreddit_name = str_to_lower(subreddit_name),
     subscribers_count = as.numeric(subscribers_count)
-  ) %>%
-  arrange(desc(subscribers_count)) %>%
-  slice(1:5)
+  )
 
+top_5 <- popularity_large %>%
+  arrange(desc(subscribers_count)) %>%
+  slice(1:5) %>%
+  select(subreddit_name, subscribers_count)
 
 ```
 
