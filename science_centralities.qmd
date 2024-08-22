@@ -1,5 +1,5 @@
 ---
-title: "funny_centralities"
+title: "science_centralities"
 author: "Siya Brown"
 date: today 
 format: html
@@ -79,24 +79,24 @@ popularity_large <- read_csv("data/subreddits_public.csv")
 popularity_clean <- popularity_large %>%
   mutate(subreddit_name = str_to_lower(subreddit_name))
 
-funny_1 <- hyperlink_large %>%
+science_1 <- hyperlink_large %>%
   janitor::clean_names() %>%
-  filter(source_subreddit == "funny" | target_subreddit == "funny")
+  filter(source_subreddit == "science" | target_subreddit == "science")
   
-funny_2 <- hyperlink_large %>%
+science_2 <- hyperlink_large %>%
   janitor::clean_names() %>%
-  filter(source_subreddit %in% funny_1$source_subreddit | 
-           target_subreddit %in% funny_1$target_subreddit |
-           source_subreddit %in% funny_1$target_subreddit |
-           target_subreddit %in% funny_1$source_subreddit)
+  filter(source_subreddit %in% science_1$source_subreddit | 
+           target_subreddit %in% science_1$target_subreddit |
+           source_subreddit %in% science_1$target_subreddit |
+           target_subreddit %in% science_1$source_subreddit)
   
-funny_3 <- funny_2 %>%
+science_3 <- science_2 %>%
   count(source_subreddit, target_subreddit) %>%
   filter(n > 35)
 
 popularity <- popularity_clean %>%
-  filter(subreddit_name %in% funny_3$source_subreddit | 
-           subreddit_name %in% funny_3$target_subreddit) %>%
+  filter(subreddit_name %in% science_3$source_subreddit | 
+           subreddit_name %in% science_3$target_subreddit) %>%
   select(subreddit_name, subscribers_count) %>%
   mutate(
     subscribers_count = as.numeric(subscribers_count),
@@ -127,12 +127,12 @@ summary(popularity)
 # some functions that only are available in sna package
 # As a first step, create a 'sna' graph object from an 'igraph' object
 
-# Convert funny_3 into an igraph object
-funny3_igraph <- igraph::graph_from_data_frame(funny_3, directed = TRUE)
+# Convert science_3 into an igraph object
+science3_igraph <- igraph::graph_from_data_frame(science_3, directed = TRUE)
 
 # As a first step, create a 'sna' graph object from an 'igraph' object
-sna_funny3 <-
-  igraph::as_adjacency_matrix(funny3_igraph, sparse = FALSE) %>% network::as.network.matrix()
+sna_science3 <-
+  igraph::as_adjacency_matrix(science3_igraph, sparse = FALSE) %>% network::as.network.matrix()
 
 # this detaching is a necessary step since the two packages have some same function names
 # R is often confused
@@ -143,19 +143,19 @@ library(igraph)
 
 ```{r}
 # Find the components
-funny_comp <- igraph::components(funny3_igraph)
+science_comp <- igraph::components(science3_igraph)
 
 # Extract the largest connected component
-giantGraph_funny <- induced_subgraph(funny3_igraph, which(funny_comp$membership == which.max(funny_comp$csize)))
+giantGraph_science <- induced_subgraph(science3_igraph, which(science_comp$membership == which.max(science_comp$csize)))
 
 # Verify the size of the largest component
-vcount(giantGraph_funny) # number of nodes
-ecount(giantGraph_funny) # number of edges
+vcount(giantGraph_science) # number of nodes
+ecount(giantGraph_science) # number of edges
 
 
 # We will compute centralities based on 'network' package
 # First, create a dataframe to store the centrality information
-centralities_giantGraph_funny <- data.frame('node_name' = V(giantGraph_funny)$name)
+centralities_giantGraph_science <- data.frame('node_name' = V(giantGraph_science)$name)
 ```
 
 
@@ -167,28 +167,28 @@ centralities_giantGraph_funny <- data.frame('node_name' = V(giantGraph_funny)$na
 
 library(igraph)
 # Calculate in-degree centrality (number of incoming edges)
-V(giantGraph_funny)$in_degree <- igraph::degree(giantGraph_funny, mode = "in")
+V(giantGraph_science)$in_degree <- igraph::degree(giantGraph_science, mode = "in")
 
 # Calculate out-degree centrality (number of outgoing edges)
-V(giantGraph_funny)$out_degree <- igraph::degree(giantGraph_funny, mode = "out")
+V(giantGraph_science)$out_degree <- igraph::degree(giantGraph_science, mode = "out")
 
 # Calculate total degree centrality (sum of in-degree and out-degree)
-V(giantGraph_funny)$total_degree <- igraph::degree(giantGraph_funny, mode = "all")
+V(giantGraph_science)$total_degree <- igraph::degree(giantGraph_science, mode = "all")
 
 # Display the top 10 nodes by in-degree
-top_in_degree <- data.frame(node_name = V(giantGraph_funny)$name, in_degree = V(giantGraph_funny)$in_degree) |> 
+top_in_degree <- data.frame(node_name = V(giantGraph_science)$name, in_degree = V(giantGraph_science)$in_degree) |> 
   dplyr::slice_max(order_by = in_degree, n = 10) |> 
   kableExtra::kable()
 top_in_degree
 
 # Display the top 10 nodes by out-degree
-top_out_degree <- data.frame(node_name = V(giantGraph_funny)$name, out_degree = V(giantGraph_funny)$out_degree) |> 
+top_out_degree <- data.frame(node_name = V(giantGraph_science)$name, out_degree = V(giantGraph_science)$out_degree) |> 
   dplyr::slice_max(order_by = out_degree, n = 10) |> 
   kableExtra::kable()
 top_out_degree
 
 # Display the top 10 nodes by total degree
-top_total_degree <- data.frame(node_name = V(giantGraph_funny)$name, total_degree = V(giantGraph_funny)$total_degree) |> 
+top_total_degree <- data.frame(node_name = V(giantGraph_science)$name, total_degree = V(giantGraph_science)$total_degree) |> 
   dplyr::slice_max(order_by = total_degree, n = 10) |> 
   kableExtra::kable()
 top_total_degree
@@ -199,10 +199,10 @@ top_total_degree
 ```{r}
 #| label: betweenness
 
-V(giantGraph_funny)$betweenness <- igraph::betweenness(giantGraph_funny, directed = TRUE)
+V(giantGraph_science)$betweenness <- igraph::betweenness(giantGraph_science, directed = TRUE)
 
 # Top 10 nodes by betweenness centrality
-top_betweenness <- data.frame(node_name = V(giantGraph_funny)$name, betweenness = V(giantGraph_funny)$betweenness) |> 
+top_betweenness <- data.frame(node_name = V(giantGraph_science)$name, betweenness = V(giantGraph_science)$betweenness) |> 
   dplyr::slice_max(order_by = betweenness, n = 10) |> 
   kableExtra::kable()
 top_betweenness
@@ -214,10 +214,10 @@ top_betweenness
 ```{r}
 #| label: closeness
 ### Closeness Centrality ###
-V(giantGraph_funny)$closeness <- igraph::closeness(giantGraph_funny, mode = "out")
+V(giantGraph_science)$closeness <- igraph::closeness(giantGraph_science, mode = "out")
 
 # Top 10 nodes by closeness centrality
-top_closeness <- data.frame(node_name = V(giantGraph_funny)$name, closeness = V(giantGraph_funny)$closeness) |> 
+top_closeness <- data.frame(node_name = V(giantGraph_science)$name, closeness = V(giantGraph_science)$closeness) |> 
   dplyr::slice_max(order_by = closeness, n = 10) |> 
   kableExtra::kable()
 top_closeness
@@ -233,10 +233,10 @@ top_closeness
 
 
 ### Eigenvector Centrality ###
-V(giantGraph_funny)$eigenvector <- igraph::eigen_centrality(giantGraph_funny, directed = TRUE)$vector
+V(giantGraph_science)$eigenvector <- igraph::eigen_centrality(giantGraph_science, directed = TRUE)$vector
 
 # Top 10 nodes by eigenvector centrality
-top_eigenvector <- data.frame(node_name = V(giantGraph_funny)$name, eigenvector = V(giantGraph_funny)$eigenvector) |> 
+top_eigenvector <- data.frame(node_name = V(giantGraph_science)$name, eigenvector = V(giantGraph_science)$eigenvector) |> 
   dplyr::slice_max(order_by = eigenvector, n = 10) |> 
   kableExtra::kable()
 top_eigenvector
@@ -250,10 +250,10 @@ top_eigenvector
 #| label: burt
 # Calculate Burt's network constraint and store it in the data.frame called 'centralities'
 # using 'igraph' because 'sna' doesn't have the function
-centralities_giantGraph_funny$netconstraint <- igraph::constraint(giantGraph_funny)
+centralities_giantGraph_science$netconstraint <- igraph::constraint(giantGraph_science)
 # help(constraint) # Be careful with the interpretation for constraint: High constraint = redundant contacts, low constraint = acting as a broker
 
-centralities_giantGraph_funny |> 
+centralities_giantGraph_science |> 
   dplyr::slice_min(order_by = netconstraint, n = 10) %>%
   select(node_name, netconstraint) %>%
   kableExtra::kable()
@@ -277,23 +277,23 @@ detach('package:statnet', unload = TRUE)
 library(igraph)
 
 ## calculate k-cores
-kcore_funny <-
-  giantGraph_funny %>% coreness(.)
-kcore_funny ## show the results of k-core decomposition
+kcore_science <-
+  giantGraph_science %>% coreness(.)
+kcore_science ## show the results of k-core decomposition
 
 ```
 
 ```{r}
 #| label: k-core 2
 ## Plot a graph colored by the k-core decomposition results
-giantGraph_funny %>%
+giantGraph_science %>%
   plot(
     .,
     layout = layout_with_gem(.),
     # layout = layout_with_sugiyama(.),
     edge.arrow.size = .3,
     vertex.size = 20,
-    vertex.label = V(giantGraph_funny)$name,
+    vertex.label = V(giantGraph_science)$name,
     vertex.color = adjustcolor(graph.coreness(.), alpha.f = .3),
     vertex.label.cex = .5,
     vertex.label.color = 'black',
@@ -314,7 +314,7 @@ giantGraph_funny %>%
 # below is using Newman-Girvan Algorithm (2003)
 # if communities do not make sense to you, replace with your choice
 # e.g., cluster_infomap, cluster_walktrap etc.
-cluster_funny <- giantGraph_funny %>% cluster_edge_betweenness()
+cluster_science <- giantGraph_science %>% cluster_edge_betweenness()
 # cluster_hmn <- giantGraph_hmn %>% cluster_edge_betweenness()
 ## you may see orange warning messages since the edge betweenness algorithm is not designed for a directed graph
 ## but you'll be able to see the results anyway.
@@ -327,21 +327,21 @@ cluster_funny <- giantGraph_funny %>% cluster_edge_betweenness()
 ```{r}
 #| label: community detection 2
 # Find the number of clusters
-membership(cluster_funny)   # affiliation list
+membership(cluster_science)   # affiliation list
 # membership(cluster_hmn)   # affiliation list
-length(cluster_funny) # number of clusters
+length(cluster_science) # number of clusters
 # length(cluster_hmn) # number of clusters
 
 # Find the size of each cluster
 # Note that communities with one node are isolates, or have only a single tie
-sizes(cluster_funny)
+sizes(cluster_science)
 # sizes(cluster_hmn) 
 ```
 
 ```{r}
 #| label: modularity
 # modularity measure
-modularity(cluster_funny)
+modularity(cluster_science)
 # modularity(cluster_hmn)
 ```
 
@@ -353,14 +353,14 @@ The modularity score is 0.2335753. Modularity is an assessment of the number of 
 #| label: community detection 3
 # Visualize clusters - that puts colored blobs around the nodes in the same community.
 # You may want to remove vertex.label=NA to figure out what terms are clustered.
-cluster_funny %>% plot(
+cluster_science %>% plot(
   .,
-  giantGraph_funny,
+  giantGraph_science,
   #layout = layout_nicely(giantGraph_gpt),
-  layout = layout_with_fr(giantGraph_funny),
+  layout = layout_with_fr(giantGraph_science),
   edge.arrow.size = .3,
   vertex.size = 10,
-  vertex.label = V(funny3_igraph)$name,
+  vertex.label = V(science3_igraph)$name,
   vertex.color = adjustcolor(membership(.), alpha.f = .3),
   vertex.label.cex = .3,
   vertex.label.color = 'black',
@@ -371,4 +371,3 @@ cluster_funny %>% plot(
 )
 
 ```
-

@@ -1,16 +1,43 @@
 ---
-title: "todayilearned_ergm"
-author: "Katie Lam"
+title: "todayilearned_centralities"
+author: "Siya Brown"
 date: today 
 format: html
 editor_options: 
   chunk_output_type: console
 ---
 
-## Load packages
-
 ```{r}
 #| echo: true
+#| output: false
+#| message: false
+#| label: load packages
+
+# Start with a clear environment
+rm(list=ls())
+
+######################################################################################
+# The first time you run this file, you will need to install several packages.
+# To do that, run the code section below. It may take a couple minutes.
+# You only need to install packages once, next time you should skip the install lines.
+list.of.packages <- c("robustbase","igraph","statnet", "kableExtra", "poweRlaw")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+# You need to load packages every time you run the script or restart R.
+library(dplyr)
+library(igraph)
+library(ggplot2)
+library(poweRlaw)
+library(igraph)
+library(tidyverse)
+library(network)
+# To chenetwork# To check whether your R loads these packages, run the following code
+sessionInfo() ## check other attached packages. If igraph is listed there, you're ready!
+```
+
+```{r}
+#| echo: false
 #| output: false
 #| message: false
 
@@ -28,39 +55,34 @@ if (!"texreg" %in% installed.packages()) install.packages("texreg") # For printi
 library(statnet)
 library(readr)
 
+# -------------------------------------------------------------------------------------------------
+# Set the working directory
+# Session > Set Working Directory > To Source File Location
+# -------------------------------------------------------------------------------------------------
 list.files() # List the files in the current working directory to see if you're in the right directory
 
 ```
 
-
-## Load data
-
 ```{r}
-#| echo: true
+#| echo: false
 #| output: false
 #| message: false
 #| label: load data
 
-library(dplyr) 
-library(tidyverse)
-
-# read hyperlink tsv file
 hyperlink_large <- read_tsv("data/soc-redditHyperlinks-body.tsv") %>%
   janitor::clean_names() %>%
   select(source_subreddit, target_subreddit)
 
-# read popularity csv file
+# read csv
 popularity_large <- read_csv("data/subreddits_public.csv")
 
 popularity_clean <- popularity_large %>%
   mutate(subreddit_name = str_to_lower(subreddit_name))
 
-# find all subreddits with "todayilearned" as source or target
 todayilearned_1 <- hyperlink_large %>%
   janitor::clean_names() %>%
   filter(source_subreddit == "todayilearned" | target_subreddit == "todayilearned")
   
-# 2 layer: find all links from subreddits related to "todayilearned"
 todayilearned_2 <- hyperlink_large %>%
   janitor::clean_names() %>%
   filter(source_subreddit %in% todayilearned_1$source_subreddit | 
@@ -68,249 +90,284 @@ todayilearned_2 <- hyperlink_large %>%
            source_subreddit %in% todayilearned_1$target_subreddit |
            target_subreddit %in% todayilearned_1$source_subreddit)
   
-# count # of links <- take only n > 35
 todayilearned_3 <- todayilearned_2 %>%
   count(source_subreddit, target_subreddit) %>%
   filter(n > 35)
 
-# clean popularity file
 popularity <- popularity_clean %>%
   filter(subreddit_name %in% todayilearned_3$source_subreddit | 
            subreddit_name %in% todayilearned_3$target_subreddit) %>%
   select(subreddit_name, subscribers_count) %>%
   mutate(
     subscribers_count = as.numeric(subscribers_count),
-    
-    # categorical variable determining size of subreddit
     size = case_when(
       subscribers_count <= 10000 ~ "small",
       subscribers_count <= 50000 ~ "medium",
       subscribers_count > 50000 ~ "large"
     ),
-    # deal with NA values
     size = size %>% 
       replace_na("missing")
   ) %>% 
   arrange(subreddit_name)
 
-
+summary(popularity)
 ```
-
-
-## make network
-
-```{r}
-#| echo: true
-#| output: false
-#| message: false
-
-head(todayilearned_3)
-
-# Convert the edgelist to a network object in statnet format:
-todayilearned_net <- as.network.matrix(todayilearned_3, matrix.type = "edgelist") 
-
-plot(todayilearned_net)
-# 
-todayilearned_net |>
-  network::set.vertex.attribute("size", value = popularity$size)
-
-network::get.vertex.attribute(todayilearned_net,"vertex.names")
-
-network::get.vertex.attribute(todayilearned_net,"size")
-
-```
-
-
-## make igraph object
-
-```{r}
-
-library('igraph') # Ignore messages on any objects that are masked
-
-# Set default plot options
-igraph_options(vertex.size = 2, vertex.color = 'grey',
-               edge.color='gray80', edge.arrow.size=.1,
-               vertex.label = NA)                       
-
-# make an igraph network object from statnet network object
-todayilearned_igraph <- graph.adjacency(as.matrix.network(todayilearned_net)) 
-
-# set vertex attribute for size
-todayilearned_igraph <- set_vertex_attr(todayilearned_igraph, "popularity", value = network::get.vertex.attribute(todayilearned_net,"size"))
-
-# count components
-count_components(todayilearned_igraph)
-
-
-```
-
-## find giant component
-
-```{r}
-#| label: giant component
-
-reddit_comp <- igraph::components(todayilearned_igraph)
-giantGraph_todayilearned <- todayilearned_igraph %>%
-  induced_subgraph(., which(reddit_comp$membership == which.max(reddit_comp$csize)))
-
-plot(giantGraph_todayilearned)
-
-library(intergraph)
-
-todayilearned_giant <- asNetwork(giantGraph_todayilearned)
-
-todayilearned_giant
-# vcount(gpt_graph) ## the number of nodes/actors/users
-# ecount(gpt_graph) ## the number of edges
-```
-
-
-## ergm summaries
-
-```{r}
-
-library(statnet)
-options(ergm.loglik.warn_dyads=FALSE) 
-
-# Look at Endogenous statistics: terms based on only ties in the advice network
-summary(todayilearned_giant ~ edges)                     # Number of edges (ties)
-summary(todayilearned_giant ~ mutual)                    # Number of pairs of reciprocated ties
-
-summary(todayilearned_giant ~ idegree(0:65))             # Indegree distribution.
-summary(todayilearned_giant ~ gwodegree(log(2),fixed=T)) # One parameter summarizing outdegree distribution - tendency against outdegree hubs
-summary(todayilearned_giant ~ gwidegree(log(2),fixed=T)) # One parameters summarizing indegree distribution - tendency against indegree hubs
-summary(todayilearned_giant ~ desp(1:5))  
-
-todayilearned_giant
-
-# remove missing
-summary(todayilearned_giant ~ nodematch("popularity", levels = -3, diff = TRUE)) 
-```
-
-### fit model 1
-
-**Hypothesis to consider**
-
-## 1. Subreddits have a tendency to form more ties than a random network
-
-## 2. Subreddits are likely to have reciprocal ties 
-
-## 3. Subreddits have a preferential indegree attachement --> want to determine whether todayilearned is a hub or an authority node.
-
-## 4. Subreddits have a tendency to form more ties based on subreddits with the same size.
 
 ```{r}
 #| message: false
-# The following commands do model estimation for ERGMs.
-# This may take a second. Text will print in-console to update you on progress in model estimation.
-model1 <- ergm(todayilearned_giant ~ edges
-               + mutual 
-               + gwidegree(log(2),fixed=T)
-               + nodematch("popularity", levels = -3)
-               
-               , control = control.ergm(seed = 42)
-               , verbose = F
+#| warning: false
+#| label: centrality
+######################################################################################
+#
+# Part III: Local Network Properties
+#
+######################################################################################
+
+# For this part, you switch 'igraph' to 'sna' package because we are going to use 
+# some functions that only are available in sna package
+# As a first step, create a 'sna' graph object from an 'igraph' object
+
+# Convert todayilearned_3 into an igraph object
+todayilearned3_igraph <- igraph::graph_from_data_frame(todayilearned_3, directed = TRUE)
+
+# As a first step, create a 'sna' graph object from an 'igraph' object
+sna_todayilearned3 <-
+  igraph::as_adjacency_matrix(todayilearned3_igraph, sparse = FALSE) %>% network::as.network.matrix()
+
+# this detaching is a necessary step since the two packages have some same function names
+# R is often confused
+library(igraph)
+```
+
+## giant component 
+
+```{r}
+# Find the components
+todayilearned_comp <- igraph::components(todayilearned3_igraph)
+
+# Extract the largest connected component
+giantGraph_todayilearned <- induced_subgraph(todayilearned3_igraph, which(todayilearned_comp$membership == which.max(todayilearned_comp$csize)))
+
+# Verify the size of the largest component
+vcount(giantGraph_todayilearned) # number of nodes
+ecount(giantGraph_todayilearned) # number of edges
+
+
+# We will compute centralities based on 'network' package
+# First, create a dataframe to store the centrality information
+centralities_giantGraph_todayilearned <- data.frame('node_name' = V(giantGraph_todayilearned)$name)
+```
+
+
+### degree
+# For directed graphs, we can calculate in-degree, out-degree, and total degree centralities separately:
+
+```{r}
+#| label: Degree Centralities 
+
+library(igraph)
+# Calculate in-degree centrality (number of incoming edges)
+V(giantGraph_todayilearned)$in_degree <- igraph::degree(giantGraph_todayilearned, mode = "in")
+
+# Calculate out-degree centrality (number of outgoing edges)
+V(giantGraph_todayilearned)$out_degree <- igraph::degree(giantGraph_todayilearned, mode = "out")
+
+# Calculate total degree centrality (sum of in-degree and out-degree)
+V(giantGraph_todayilearned)$total_degree <- igraph::degree(giantGraph_todayilearned, mode = "all")
+
+# Display the top 10 nodes by in-degree
+top_in_degree <- data.frame(node_name = V(giantGraph_todayilearned)$name, in_degree = V(giantGraph_todayilearned)$in_degree) |> 
+  dplyr::slice_max(order_by = in_degree, n = 10) |> 
+  kableExtra::kable()
+top_in_degree
+
+# Display the top 10 nodes by out-degree
+top_out_degree <- data.frame(node_name = V(giantGraph_todayilearned)$name, out_degree = V(giantGraph_todayilearned)$out_degree) |> 
+  dplyr::slice_max(order_by = out_degree, n = 10) |> 
+  kableExtra::kable()
+top_out_degree
+
+# Display the top 10 nodes by total degree
+top_total_degree <- data.frame(node_name = V(giantGraph_todayilearned)$name, total_degree = V(giantGraph_todayilearned)$total_degree) |> 
+  dplyr::slice_max(order_by = total_degree, n = 10) |> 
+  kableExtra::kable()
+top_total_degree
+```
+
+### betweenness
+
+```{r}
+#| label: betweenness
+
+V(giantGraph_todayilearned)$betweenness <- igraph::betweenness(giantGraph_todayilearned, directed = TRUE)
+
+# Top 10 nodes by betweenness centrality
+top_betweenness <- data.frame(node_name = V(giantGraph_todayilearned)$name, betweenness = V(giantGraph_todayilearned)$betweenness) |> 
+  dplyr::slice_max(order_by = betweenness, n = 10) |> 
+  kableExtra::kable()
+top_betweenness
+
+```
+
+### closeness # this is calculating outgoing paths
+
+```{r}
+#| label: closeness
+### Closeness Centrality ###
+V(giantGraph_todayilearned)$closeness <- igraph::closeness(giantGraph_todayilearned, mode = "out")
+
+# Top 10 nodes by closeness centrality
+top_closeness <- data.frame(node_name = V(giantGraph_todayilearned)$name, closeness = V(giantGraph_todayilearned)$closeness) |> 
+  dplyr::slice_max(order_by = closeness, n = 10) |> 
+  kableExtra::kable()
+top_closeness
+
+```
+
+### eigenvector
+
+```{r}
+#| label: eigenvector
+# Calculate eigenvector centrality and store it in the data.frame called 'centralities'
+# using 'igraph' because the code implemented in 'sna' is unreliable
+
+
+### Eigenvector Centrality ###
+V(giantGraph_todayilearned)$eigenvector <- igraph::eigen_centrality(giantGraph_todayilearned, directed = TRUE)$vector
+
+# Top 10 nodes by eigenvector centrality
+top_eigenvector <- data.frame(node_name = V(giantGraph_todayilearned)$name, eigenvector = V(giantGraph_todayilearned)$eigenvector) |> 
+  dplyr::slice_max(order_by = eigenvector, n = 10) |> 
+  kableExtra::kable()
+top_eigenvector
+
+
+```
+
+### Burt's network constraint
+
+```{r}
+#| label: burt
+# Calculate Burt's network constraint and store it in the data.frame called 'centralities'
+# using 'igraph' because 'sna' doesn't have the function
+centralities_giantGraph_todayilearned$netconstraint <- igraph::constraint(giantGraph_todayilearned)
+# help(constraint) # Be careful with the interpretation for constraint: High constraint = redundant contacts, low constraint = acting as a broker
+
+centralities_giantGraph_todayilearned |> 
+  dplyr::slice_min(order_by = netconstraint, n = 10) %>%
+  select(node_name, netconstraint) %>%
+  kableExtra::kable()
+
+```
+
+### K-core
+
+```{r}
+#| message: false
+#| warning: false
+#| label: k-core 1
+######################################################################################
+#
+# Part IV: Global Network Properties
+#
+######################################################################################
+# To go back to igraph analysis, don't forget detaching 'sna' and 'network' first
+# before recalling 'igraph'
+detach('package:statnet', unload = TRUE)
+library(igraph)
+
+## calculate k-cores
+kcore_todayilearned <-
+  giantGraph_todayilearned %>% coreness(.)
+kcore_todayilearned ## show the results of k-core decomposition
+
+```
+
+```{r}
+#| label: k-core 2
+## Plot a graph colored by the k-core decomposition results
+giantGraph_todayilearned %>%
+  plot(
+    .,
+    layout = layout_with_gem(.),
+    # layout = layout_with_sugiyama(.),
+    edge.arrow.size = .3,
+    vertex.size = 20,
+    vertex.label = V(giantGraph_todayilearned)$name,
+    vertex.color = adjustcolor(graph.coreness(.), alpha.f = .3),
+    vertex.label.cex = .5,
+    vertex.label.color = 'black',
+    mark.groups = by(seq_along(graph.coreness(.)), graph.coreness(.), invisible),
+    mark.shape = 1 / 4,
+    mark.col = rainbow(length(unique(graph.coreness(
+      .
+    ))), alpha = .1),
+    mark.border = NA,
+  )
+
+```
+
+```{r}
+#| label: community detection
+# Plot the number of clusters in the graph and their size
+# there are also other algorithms for this you may want to explore
+# below is using Newman-Girvan Algorithm (2003)
+# if communities do not make sense to you, replace with your choice
+# e.g., cluster_infomap, cluster_walktrap etc.
+cluster_todayilearned <- giantGraph_todayilearned %>% cluster_edge_betweenness()
+# cluster_hmn <- giantGraph_hmn %>% cluster_edge_betweenness()
+## you may see orange warning messages since the edge betweenness algorithm is not designed for a directed graph
+## but you'll be able to see the results anyway.
+## if you want to use a more appropriate algorithm for a directed graph, try:
+# cluster <- giantGraph_gpt %>% cluster_walktrap()
+# cluster <- giantGraph_hmn %>% cluster_walktrap()
+
+```
+
+```{r}
+#| label: community detection 2
+# Find the number of clusters
+membership(cluster_todayilearned)   # affiliation list
+# membership(cluster_hmn)   # affiliation list
+length(cluster_todayilearned) # number of clusters
+# length(cluster_hmn) # number of clusters
+
+# Find the size of each cluster
+# Note that communities with one node are isolates, or have only a single tie
+sizes(cluster_todayilearned)
+# sizes(cluster_hmn) 
+```
+
+```{r}
+#| label: modularity
+# modularity measure
+modularity(cluster_todayilearned)
+# modularity(cluster_hmn)
+```
+
+Interpret the modularity score of your results of community detection.
+
+The modularity score is 0.2335753. Modularity is an assessment of the number of connections within a cluster and the comparison of how many connections would exist in a randomly distributed network. This modularity score means that the network ......
+
+```{r}
+#| label: community detection 3
+# Visualize clusters - that puts colored blobs around the nodes in the same community.
+# You may want to remove vertex.label=NA to figure out what terms are clustered.
+cluster_todayilearned %>% plot(
+  .,
+  giantGraph_todayilearned,
+  #layout = layout_nicely(giantGraph_gpt),
+  layout = layout_with_fr(giantGraph_todayilearned),
+  edge.arrow.size = .3,
+  vertex.size = 10,
+  vertex.label = V(todayilearned3_igraph)$name,
+  vertex.color = adjustcolor(membership(.), alpha.f = .3),
+  vertex.label.cex = .3,
+  vertex.label.color = 'black',
+  mark.groups = by(seq_along(membership(.)), membership(.), invisible),
+  mark.shape = 1/4,
+  mark.col = rainbow(length(.), alpha = .1),
+  mark.border = NA
 )
-summary(model1)
 
 ```
-
-# display results of model 1
-```{r}
-
-library(texreg)
-screenreg(list("model1"=model1))
-```
-.
-```{r}
-par(mar=c(1,1,1,1))
-mcmc.diagnostics(model1)
-```
-
-## 2. Perform Goodness of Fit test to check how well the estimated model captures certain statistical features of the observed network for both model 1 and 2. **(10 pts)**
-
-a.  To do so, simulate many networks from the estimated model and extract 100 samples from the simulation process. Please note, this may take 2 minutes or more to compute.
-
-```{r}
-#| warning: false
-
-sim1 <- simulate(model1, burnin=100000, interval=100000, nsim=100, verbose=T)  # Uses the ergm model to simulate a null model
-# Plot the first of the simulated networks
-sim1_net1 <- igraph::graph.adjacency(as.matrix.network(sim1[[1]]))
-igraph::plot.igraph(sim1_net1,edge.color="brown",  
-                    vertex.color = 'grey',edge.arrow.size=.1)
-
-# Plot the 10th simulated network
-sim1_net10 <- igraph::graph.adjacency(as.matrix.network(sim1[[10]]))
-igraph::plot.igraph(sim1_net10,edge.color="red",  
-                    vertex.color = 'grey',edge.arrow.size=.1)
-```
-
-b.  Extract the number of triangles from each of the 100 samples.
-
-```{r}
-# -------------------------------------------------------------------------------------------------
-# Extract the number of triangles from each of the 100 samples and
-# compare the distribution of triangles in the sampled networks with the observed network
-# -------------------------------------------------------------------------------------------------
-# Model 1:
-model1.tridist <- sapply(1:100, function(x) summary(sim1[[x]] ~triangle)) # Extracts the triangle data from the simulated networks
-hist(model1.tridist,xlim=c(0,1000),breaks=10)                             # Plots that triangle distribution as a histogram, change xlim to change the x-axis range if necessary
-advice.tri <- summary(todayilearned_net ~ triangle)                                    # Stores the number of observed triangles
-advice.tri
-arrows(advice.tri,20, advice.tri, 0.5, col="red", lwd=3)                      # Adds an arrow to the plotted histogram
-c(obs=advice.tri,mean=mean(model1.tridist),sd=sd(model1.tridist),
-  tstat=abs(mean(model1.tridist)-advice.tri)/sd(model1.tridist))
-
-```
-
-c.  Compare the distribution of triangles in the sampled networks with the observed network by generating a histogram of the triangles. Interpret your result -- is the estimated model a good one in terms of triangle measure?
-
-The histogram of triangles shows that model 1 does not have that good of a fit for triangle measure because our observed model does not land in the distribution of random sampled networks. The t-stat is 6.784396 which is a bad fit. The boxplot created from the code below for `edgewise shared partners` also shows that the observed network does not align well with the other generated networks. This GOF calculation shows us that the goodness of fit for `edgewise shared partners` have an average low p-value (some values are 0), which we can use to conclude that model 1 is not good to measure triangles in the network. However, for the histogram of model 2, our observed network fits inside of the distribution which indicates that it is a good model in terms of triangle measure. Here, the t-stat is 0.2754067, which is between 0.1 and 1, signifying a good fit. Additionally the p-values for `edgewise shared partners` are also high and the distribution boxplot for `edgewise shared partners` matches mostly well with the observed data, indicating that the goodness of fit is good for model 2. 
-
-```{r}
-#| warning: false
-# -------------------------------------------------------------------------------------------------
-# Test the goodness of fit of the model
-# Compiles statistics for these simulations as well as the observed network, and calculates p-values 
-# -------------------------------------------------------------------------------------------------
-
-# Model 1:
-# It may take a second for this command to run.
-gof1 <- gof(model1, verbose=T, burnin=1e+5, interval=1e+5, control = control.gof.ergm(nsim = 200))
-# If you run below and then wouldn't see the plot, try par(mar=c(2,2,2,2))
-dev.off()           # Clear any other plots from the plot window
-plot(gof1)          # Plot the goodness of fit
-                    # Note: This should produce five separate plots that you should look through.
-                    #       In RStudio, scroll between the plots using the arrow buttons
-gof1                # Display the goodness of fit info in the console
-```
-
-
-### Endogenous Effects (Effects of the ties being predicted on other predicted ties)
-
-● ***edges***: number of edges in the network
-
-● ***mutual*****:** number of reciprocal edges in the network
-
-●  ***gwidegree**: Geometrically Weighted Indegree*. This term measures a tendency *against* indegree preferential attachment. (Negative coefficients show indegree preferential attachment -- Incoming ties are more likely to be directed towards nodes that already have other incoming ties.)
-
-● ***gwodegree**: Directed Geometrically Weighted Outdegree.* This term measures a tendency *against* outdegree preferential attachment. (Negative coefficients show outdegree preferential attachment -- Outgoing ties are more likely to originate from nodes that already have other outgoing ties)
-
-● ***dgwesp**, of type "OTP"*: *Directed Geometrically Weighted Edgewise Shared Partners* Number of edges that belong to certain types of triangles. "Edgewise" refers to the fact that we require a tie to exist between nodes i and j, and then measure the number of "shared partners" between them. Shared partners are nodes that have a certain relationship between i and j. In this case, we are looking at the Outgoing Two Path ("OTP") relationships. This is one way to operationalize transitivity. The "geometrically weighted" refers to the fact that we will use a weight parameter,, to add diminishing returns to the number of shared partners (i.e., the second shared partner between two nodes will have less effect on the likelihood of a network than the first shared partner, the third will have even less of an effect, and so on).
-
-Yes, geometrically weighted terms (gwidegree, gwodegree, dgwesp) are very complicated. Essentially, the "geometric weighted" part is saying that effects on network probability have diminishing returns for nodes as degree or the number of shared partners gets higher and higher. This helps avoid model fits where all the ties are directed towards one node. For the purposes of this class, you can ignore the technical details and just focus on interpreting them in terms of "preferential attachment" or "transitivity" effects.
-
-### **Exogenous Effects (Effects of node attributes or variables outside the predicted ties)**
-
-● ***nodeicov***: covariance between in-degree of nodes and attributes of nodes
-
-● ***nodeocov***: covariance between out-degree of nodes and attributes of nodes
-
-● ***diff***: differences between nodes on some numeric attribute (ex. tenure, age). The way we have it specified in the code, diff scores are is calculated as the attribute value of the sending node (attb~i~) minus value of the receiving node (attb~j~). (Heterophily/ anti-homophily on continuous variables).
-
-● ***nodematc**h*: tendency of nodes to form ties with those of matching values (Homophily on categorical variables)
-
-● ***nodemix***: mixing matrix of all different combinations of node attributes (ex. A -\> A ties, A-\> B ties, B -\> A ties, B -\> B ties). To avoid model overspecification, we need to leave one of these cells out of the model. The weights (effect sizes) estimated for all of the terms we leave in the model then represent the effect of a combination relative to the effect that we left out.
-
-● ***edgecov***: covariance between edges of two networks (the presence/strength of a tie in an outside network on whether a tie exists in our dependent variable network -- Advice)

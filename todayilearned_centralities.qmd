@@ -1,0 +1,316 @@
+---
+title: "todayilearned_ergm"
+author: "Katie Lam"
+date: today 
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+## Load packages
+
+```{r}
+#| echo: true
+#| output: false
+#| message: false
+
+rm(list=ls())
+
+# Clear your environment
+rm(list=ls())
+
+# Install packages below if you do not have them:
+# -------------------------------------------------
+if (!"statnet" %in% installed.packages()) install.packages("statnet") # For fitting ERGMs
+if (!"igraph" %in% installed.packages()) install.packages("igraph") # For network plotting
+if (!"texreg" %in% installed.packages()) install.packages("texreg") # For printing "nicer" model output
+
+library(statnet)
+library(readr)
+
+list.files() # List the files in the current working directory to see if you're in the right directory
+
+```
+
+
+## Load data
+
+```{r}
+#| echo: true
+#| output: false
+#| message: false
+#| label: load data
+
+library(dplyr) 
+library(tidyverse)
+
+# read hyperlink tsv file
+hyperlink_large <- read_tsv("data/soc-redditHyperlinks-body.tsv") %>%
+  janitor::clean_names() %>%
+  select(source_subreddit, target_subreddit)
+
+# read popularity csv file
+popularity_large <- read_csv("data/subreddits_public.csv")
+
+popularity_clean <- popularity_large %>%
+  mutate(subreddit_name = str_to_lower(subreddit_name))
+
+# find all subreddits with "todayilearned" as source or target
+todayilearned_1 <- hyperlink_large %>%
+  janitor::clean_names() %>%
+  filter(source_subreddit == "todayilearned" | target_subreddit == "todayilearned")
+  
+# 2 layer: find all links from subreddits related to "todayilearned"
+todayilearned_2 <- hyperlink_large %>%
+  janitor::clean_names() %>%
+  filter(source_subreddit %in% todayilearned_1$source_subreddit | 
+           target_subreddit %in% todayilearned_1$target_subreddit |
+           source_subreddit %in% todayilearned_1$target_subreddit |
+           target_subreddit %in% todayilearned_1$source_subreddit)
+  
+# count # of links <- take only n > 35
+todayilearned_3 <- todayilearned_2 %>%
+  count(source_subreddit, target_subreddit) %>%
+  filter(n > 35)
+
+# clean popularity file
+popularity <- popularity_clean %>%
+  filter(subreddit_name %in% todayilearned_3$source_subreddit | 
+           subreddit_name %in% todayilearned_3$target_subreddit) %>%
+  select(subreddit_name, subscribers_count) %>%
+  mutate(
+    subscribers_count = as.numeric(subscribers_count),
+    
+    # categorical variable determining size of subreddit
+    size = case_when(
+      subscribers_count <= 10000 ~ "small",
+      subscribers_count <= 50000 ~ "medium",
+      subscribers_count > 50000 ~ "large"
+    ),
+    # deal with NA values
+    size = size %>% 
+      replace_na("missing")
+  ) %>% 
+  arrange(subreddit_name)
+
+
+```
+
+
+## make network
+
+```{r}
+#| echo: true
+#| output: false
+#| message: false
+
+head(todayilearned_3)
+
+# Convert the edgelist to a network object in statnet format:
+todayilearned_net <- as.network.matrix(todayilearned_3, matrix.type = "edgelist") 
+
+plot(todayilearned_net)
+# 
+todayilearned_net |>
+  network::set.vertex.attribute("size", value = popularity$size)
+
+network::get.vertex.attribute(todayilearned_net,"vertex.names")
+
+network::get.vertex.attribute(todayilearned_net,"size")
+
+```
+
+
+## make igraph object
+
+```{r}
+
+library('igraph') # Ignore messages on any objects that are masked
+
+# Set default plot options
+igraph_options(vertex.size = 2, vertex.color = 'grey',
+               edge.color='gray80', edge.arrow.size=.1,
+               vertex.label = NA)                       
+
+# make an igraph network object from statnet network object
+todayilearned_igraph <- graph.adjacency(as.matrix.network(todayilearned_net)) 
+
+# set vertex attribute for size
+todayilearned_igraph <- set_vertex_attr(todayilearned_igraph, "popularity", value = network::get.vertex.attribute(todayilearned_net,"size"))
+
+# count components
+count_components(todayilearned_igraph)
+
+
+```
+
+## find giant component
+
+```{r}
+#| label: giant component
+
+reddit_comp <- igraph::components(todayilearned_igraph)
+giantGraph_todayilearned <- todayilearned_igraph %>%
+  induced_subgraph(., which(reddit_comp$membership == which.max(reddit_comp$csize)))
+
+plot(giantGraph_todayilearned)
+
+library(intergraph)
+
+todayilearned_giant <- asNetwork(giantGraph_todayilearned)
+
+todayilearned_giant
+# vcount(gpt_graph) ## the number of nodes/actors/users
+# ecount(gpt_graph) ## the number of edges
+```
+
+
+## ergm summaries
+
+```{r}
+
+library(statnet)
+options(ergm.loglik.warn_dyads=FALSE) 
+
+# Look at Endogenous statistics: terms based on only ties in the advice network
+summary(todayilearned_giant ~ edges)                     # Number of edges (ties)
+summary(todayilearned_giant ~ mutual)                    # Number of pairs of reciprocated ties
+
+summary(todayilearned_giant ~ idegree(0:65))             # Indegree distribution.
+summary(todayilearned_giant ~ gwodegree(log(2),fixed=T)) # One parameter summarizing outdegree distribution - tendency against outdegree hubs
+summary(todayilearned_giant ~ gwidegree(log(2),fixed=T)) # One parameters summarizing indegree distribution - tendency against indegree hubs
+summary(todayilearned_giant ~ desp(1:5))  
+
+todayilearned_giant
+
+# remove missing
+summary(todayilearned_giant ~ nodematch("popularity", levels = -3, diff = TRUE)) 
+```
+
+### fit model 1
+
+**Hypothesis to consider**
+
+## 1. Subreddits have a tendency to form more ties than a random network
+
+## 2. Subreddits are likely to have reciprocal ties 
+
+## 3. Subreddits have a preferential indegree attachement --> want to determine whether todayilearned is a hub or an authority node.
+
+## 4. Subreddits have a tendency to form more ties based on subreddits with the same size.
+
+```{r}
+#| message: false
+# The following commands do model estimation for ERGMs.
+# This may take a second. Text will print in-console to update you on progress in model estimation.
+model1 <- ergm(todayilearned_giant ~ edges
+               + mutual 
+               + gwidegree(log(2),fixed=T)
+               + nodematch("popularity", levels = -3)
+               
+               , control = control.ergm(seed = 42)
+               , verbose = F
+)
+summary(model1)
+
+```
+
+# display results of model 1
+```{r}
+
+library(texreg)
+screenreg(list("model1"=model1))
+```
+.
+```{r}
+par(mar=c(1,1,1,1))
+mcmc.diagnostics(model1)
+```
+
+## 2. Perform Goodness of Fit test to check how well the estimated model captures certain statistical features of the observed network for both model 1 and 2. **(10 pts)**
+
+a.  To do so, simulate many networks from the estimated model and extract 100 samples from the simulation process. Please note, this may take 2 minutes or more to compute.
+
+```{r}
+#| warning: false
+
+sim1 <- simulate(model1, burnin=100000, interval=100000, nsim=100, verbose=T)  # Uses the ergm model to simulate a null model
+# Plot the first of the simulated networks
+sim1_net1 <- igraph::graph.adjacency(as.matrix.network(sim1[[1]]))
+igraph::plot.igraph(sim1_net1,edge.color="brown",  
+                    vertex.color = 'grey',edge.arrow.size=.1)
+
+# Plot the 10th simulated network
+sim1_net10 <- igraph::graph.adjacency(as.matrix.network(sim1[[10]]))
+igraph::plot.igraph(sim1_net10,edge.color="red",  
+                    vertex.color = 'grey',edge.arrow.size=.1)
+```
+
+b.  Extract the number of triangles from each of the 100 samples.
+
+```{r}
+# -------------------------------------------------------------------------------------------------
+# Extract the number of triangles from each of the 100 samples and
+# compare the distribution of triangles in the sampled networks with the observed network
+# -------------------------------------------------------------------------------------------------
+# Model 1:
+model1.tridist <- sapply(1:100, function(x) summary(sim1[[x]] ~triangle)) # Extracts the triangle data from the simulated networks
+hist(model1.tridist,xlim=c(0,1000),breaks=10)                             # Plots that triangle distribution as a histogram, change xlim to change the x-axis range if necessary
+advice.tri <- summary(todayilearned_net ~ triangle)                                    # Stores the number of observed triangles
+advice.tri
+arrows(advice.tri,20, advice.tri, 0.5, col="red", lwd=3)                      # Adds an arrow to the plotted histogram
+c(obs=advice.tri,mean=mean(model1.tridist),sd=sd(model1.tridist),
+  tstat=abs(mean(model1.tridist)-advice.tri)/sd(model1.tridist))
+
+```
+
+c.  Compare the distribution of triangles in the sampled networks with the observed network by generating a histogram of the triangles. Interpret your result -- is the estimated model a good one in terms of triangle measure?
+
+The histogram of triangles shows that model 1 does not have that good of a fit for triangle measure because our observed model does not land in the distribution of random sampled networks. The t-stat is 6.784396 which is a bad fit. The boxplot created from the code below for `edgewise shared partners` also shows that the observed network does not align well with the other generated networks. This GOF calculation shows us that the goodness of fit for `edgewise shared partners` have an average low p-value (some values are 0), which we can use to conclude that model 1 is not good to measure triangles in the network. However, for the histogram of model 2, our observed network fits inside of the distribution which indicates that it is a good model in terms of triangle measure. Here, the t-stat is 0.2754067, which is between 0.1 and 1, signifying a good fit. Additionally the p-values for `edgewise shared partners` are also high and the distribution boxplot for `edgewise shared partners` matches mostly well with the observed data, indicating that the goodness of fit is good for model 2. 
+
+```{r}
+#| warning: false
+# -------------------------------------------------------------------------------------------------
+# Test the goodness of fit of the model
+# Compiles statistics for these simulations as well as the observed network, and calculates p-values 
+# -------------------------------------------------------------------------------------------------
+
+# Model 1:
+# It may take a second for this command to run.
+gof1 <- gof(model1, verbose=T, burnin=1e+5, interval=1e+5, control = control.gof.ergm(nsim = 200))
+# If you run below and then wouldn't see the plot, try par(mar=c(2,2,2,2))
+dev.off()           # Clear any other plots from the plot window
+plot(gof1)          # Plot the goodness of fit
+                    # Note: This should produce five separate plots that you should look through.
+                    #       In RStudio, scroll between the plots using the arrow buttons
+gof1                # Display the goodness of fit info in the console
+```
+
+
+### Endogenous Effects (Effects of the ties being predicted on other predicted ties)
+
+● ***edges***: number of edges in the network
+
+● ***mutual*****:** number of reciprocal edges in the network
+
+●  ***gwidegree**: Geometrically Weighted Indegree*. This term measures a tendency *against* indegree preferential attachment. (Negative coefficients show indegree preferential attachment -- Incoming ties are more likely to be directed towards nodes that already have other incoming ties.)
+
+● ***gwodegree**: Directed Geometrically Weighted Outdegree.* This term measures a tendency *against* outdegree preferential attachment. (Negative coefficients show outdegree preferential attachment -- Outgoing ties are more likely to originate from nodes that already have other outgoing ties)
+
+● ***dgwesp**, of type "OTP"*: *Directed Geometrically Weighted Edgewise Shared Partners* Number of edges that belong to certain types of triangles. "Edgewise" refers to the fact that we require a tie to exist between nodes i and j, and then measure the number of "shared partners" between them. Shared partners are nodes that have a certain relationship between i and j. In this case, we are looking at the Outgoing Two Path ("OTP") relationships. This is one way to operationalize transitivity. The "geometrically weighted" refers to the fact that we will use a weight parameter,, to add diminishing returns to the number of shared partners (i.e., the second shared partner between two nodes will have less effect on the likelihood of a network than the first shared partner, the third will have even less of an effect, and so on).
+
+Yes, geometrically weighted terms (gwidegree, gwodegree, dgwesp) are very complicated. Essentially, the "geometric weighted" part is saying that effects on network probability have diminishing returns for nodes as degree or the number of shared partners gets higher and higher. This helps avoid model fits where all the ties are directed towards one node. For the purposes of this class, you can ignore the technical details and just focus on interpreting them in terms of "preferential attachment" or "transitivity" effects.
+
+### **Exogenous Effects (Effects of node attributes or variables outside the predicted ties)**
+
+● ***nodeicov***: covariance between in-degree of nodes and attributes of nodes
+
+● ***nodeocov***: covariance between out-degree of nodes and attributes of nodes
+
+● ***diff***: differences between nodes on some numeric attribute (ex. tenure, age). The way we have it specified in the code, diff scores are is calculated as the attribute value of the sending node (attb~i~) minus value of the receiving node (attb~j~). (Heterophily/ anti-homophily on continuous variables).
+
+● ***nodematc**h*: tendency of nodes to form ties with those of matching values (Homophily on categorical variables)
+
+● ***nodemix***: mixing matrix of all different combinations of node attributes (ex. A -\> A ties, A-\> B ties, B -\> A ties, B -\> B ties). To avoid model overspecification, we need to leave one of these cells out of the model. The weights (effect sizes) estimated for all of the terms we leave in the model then represent the effect of a combination relative to the effect that we left out.
+
+● ***edgecov***: covariance between edges of two networks (the presence/strength of a tie in an outside network on whether a tie exists in our dependent variable network -- Advice)

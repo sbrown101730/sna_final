@@ -7,10 +7,37 @@ editor_options:
   chunk_output_type: console
 ---
 
-## Load packages
-
 ```{r}
 #| echo: true
+#| output: false
+#| message: false
+#| label: load packages
+
+# Start with a clear environment
+rm(list=ls())
+
+######################################################################################
+# The first time you run this file, you will need to install several packages.
+# To do that, run the code section below. It may take a couple minutes.
+# You only need to install packages once, next time you should skip the install lines.
+list.of.packages <- c("robustbase","igraph","statnet", "kableExtra", "poweRlaw")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+# You need to load packages every time you run the script or restart R.
+library(dplyr)
+library(igraph)
+library(ggplot2)
+library(poweRlaw)
+library(igraph)
+library(tidyverse)
+library(network)
+# To chenetwork# To check whether your R loads these packages, run the following code
+sessionInfo() ## check other attached packages. If igraph is listed there, you're ready!
+```
+
+```{r}
+#| echo: false
 #| output: false
 #| message: false
 
@@ -28,39 +55,34 @@ if (!"texreg" %in% installed.packages()) install.packages("texreg") # For printi
 library(statnet)
 library(readr)
 
+# -------------------------------------------------------------------------------------------------
+# Set the working directory
+# Session > Set Working Directory > To Source File Location
+# -------------------------------------------------------------------------------------------------
 list.files() # List the files in the current working directory to see if you're in the right directory
 
 ```
 
-
-## Load data
-
 ```{r}
-#| echo: true
+#| echo: false
 #| output: false
 #| message: false
 #| label: load data
 
-library(dplyr) 
-library(tidyverse)
-
-# read hyperlink tsv file
 hyperlink_large <- read_tsv("data/soc-redditHyperlinks-body.tsv") %>%
   janitor::clean_names() %>%
   select(source_subreddit, target_subreddit)
 
-# read popularity csv file
+# read csv
 popularity_large <- read_csv("data/subreddits_public.csv")
 
 popularity_clean <- popularity_large %>%
   mutate(subreddit_name = str_to_lower(subreddit_name))
 
-# find all subreddits with "worldnews" as source or target
 worldnews_1 <- hyperlink_large %>%
   janitor::clean_names() %>%
   filter(source_subreddit == "worldnews" | target_subreddit == "worldnews")
   
-# 2 layer: find all links from subreddits related to "worldnews"
 worldnews_2 <- hyperlink_large %>%
   janitor::clean_names() %>%
   filter(source_subreddit %in% worldnews_1$source_subreddit | 
@@ -68,229 +90,284 @@ worldnews_2 <- hyperlink_large %>%
            source_subreddit %in% worldnews_1$target_subreddit |
            target_subreddit %in% worldnews_1$source_subreddit)
   
-# count # of links <- take only n > 35
 worldnews_3 <- worldnews_2 %>%
   count(source_subreddit, target_subreddit) %>%
   filter(n > 35)
 
-# clean popularity file
 popularity <- popularity_clean %>%
   filter(subreddit_name %in% worldnews_3$source_subreddit | 
            subreddit_name %in% worldnews_3$target_subreddit) %>%
   select(subreddit_name, subscribers_count) %>%
   mutate(
     subscribers_count = as.numeric(subscribers_count),
-    
-    # categorical variable determining size of subreddit
     size = case_when(
       subscribers_count <= 10000 ~ "small",
       subscribers_count <= 50000 ~ "medium",
       subscribers_count > 50000 ~ "large"
     ),
-    # deal with NA values
     size = size %>% 
       replace_na("missing")
   ) %>% 
   arrange(subreddit_name)
 
-
+summary(popularity)
 ```
 
-
-## make network
-
 ```{r}
-#| echo: true
-#| output: false
 #| message: false
+#| warning: false
+#| label: centrality
+######################################################################################
+#
+# Part III: Local Network Properties
+#
+######################################################################################
 
-head(worldnews_3)
+# For this part, you switch 'igraph' to 'sna' package because we are going to use 
+# some functions that only are available in sna package
+# As a first step, create a 'sna' graph object from an 'igraph' object
 
-# Convert the edgelist to a network object in statnet format:
-worldnews_net <- as.network.matrix(worldnews_3, matrix.type = "edgelist") 
+# Convert worldnews_3 into an igraph object
+worldnews3_igraph <- igraph::graph_from_data_frame(worldnews_3, directed = TRUE)
 
-plot(worldnews_net)
-# 
-worldnews_net |>
-  network::set.vertex.attribute("size", value = popularity$size)
+# As a first step, create a 'sna' graph object from an 'igraph' object
+sna_worldnews3 <-
+  igraph::as_adjacency_matrix(worldnews3_igraph, sparse = FALSE) %>% network::as.network.matrix()
 
-network::get.vertex.attribute(worldnews_net,"vertex.names")
+# this detaching is a necessary step since the two packages have some same function names
+# R is often confused
+library(igraph)
+```
 
-network::get.vertex.attribute(worldnews_net,"size")
+## giant component 
 
+```{r}
+# Find the components
+worldnews_comp <- igraph::components(worldnews3_igraph)
+
+# Extract the largest connected component
+giantGraph_worldnews <- induced_subgraph(worldnews3_igraph, which(worldnews_comp$membership == which.max(worldnews_comp$csize)))
+
+# Verify the size of the largest component
+vcount(giantGraph_worldnews) # number of nodes
+ecount(giantGraph_worldnews) # number of edges
+
+
+# We will compute centralities based on 'network' package
+# First, create a dataframe to store the centrality information
+centralities_giantGraph_worldnews <- data.frame('node_name' = V(giantGraph_worldnews)$name)
 ```
 
 
-## make igraph object
+### degree
+# For directed graphs, we can calculate in-degree, out-degree, and total degree centralities separately:
 
 ```{r}
+#| label: Degree Centralities 
 
-library('igraph') # Ignore messages on any objects that are masked
-
-# Set default plot options
-igraph_options(vertex.size = 2, vertex.color = 'grey',
-               edge.color='gray80', edge.arrow.size=.1,
-               vertex.label = NA)                       
-
-# make an igraph network object from statnet network object
-worldnews_igraph <- graph.adjacency(as.matrix.network(worldnews_net)) 
-
-# set vertex attribute for size
-worldnews_igraph <- set_vertex_attr(worldnews_igraph, "popularity", value = network::get.vertex.attribute(worldnews_net,"size"))
-
-# count components
-count_components(worldnews_igraph)
-
-
-```
-
-## calculate centralities
-
-```{r}
-#| label: degree centralities 
-
+library(igraph)
 # Calculate in-degree centrality (number of incoming edges)
-V(worldnews_igraph)$in_degree <- degree(worldnews_igraph, mode = "in")
+V(giantGraph_worldnews)$in_degree <- igraph::degree(giantGraph_worldnews, mode = "in")
 
 # Calculate out-degree centrality (number of outgoing edges)
-V(worldnews_igraph)$out_degree <- degree(worldnews_igraph, mode = "out")
+V(giantGraph_worldnews)$out_degree <- igraph::degree(giantGraph_worldnews, mode = "out")
 
 # Calculate total degree centrality (sum of in-degree and out-degree)
-V(worldnews_igraph)$total_degree <- degree(worldnews_igraph, mode = "all")
+V(giantGraph_worldnews)$total_degree <- igraph::degree(giantGraph_worldnews, mode = "all")
 
 # Display the top 10 nodes by in-degree
-top_in_degree <- data.frame(node_name = V(worldnews_igraph)$name, in_degree = V(worldnews_igraph)$in_degree) |> 
+top_in_degree <- data.frame(node_name = V(giantGraph_worldnews)$name, in_degree = V(giantGraph_worldnews)$in_degree) |> 
   dplyr::slice_max(order_by = in_degree, n = 10) |> 
   kableExtra::kable()
-
 top_in_degree
 
 # Display the top 10 nodes by out-degree
-top_out_degree <- data.frame(node_name = V(worldnews_igraph)$name, out_degree = V(worldnews_igraph)$out_degree) |> 
+top_out_degree <- data.frame(node_name = V(giantGraph_worldnews)$name, out_degree = V(giantGraph_worldnews)$out_degree) |> 
   dplyr::slice_max(order_by = out_degree, n = 10) |> 
   kableExtra::kable()
-
 top_out_degree
 
 # Display the top 10 nodes by total degree
-top_total_degree <- data.frame(node_name = V(worldnews_igraph)$name, total_degree = V(worldnews_igraph)$total_degree) |> 
+top_total_degree <- data.frame(node_name = V(giantGraph_worldnews)$name, total_degree = V(giantGraph_worldnews)$total_degree) |> 
   dplyr::slice_max(order_by = total_degree, n = 10) |> 
   kableExtra::kable()
-
 top_total_degree
 ```
 
-
-## betweenness
+### betweenness
 
 ```{r}
-#| label: betweenness centralities 
+#| label: betweenness
 
-# Calculate betweenness centrality
-V(worldnews_igraph)$betweenness <- betweenness(worldnews_igraph, directed = TRUE)
+V(giantGraph_worldnews)$betweenness <- igraph::betweenness(giantGraph_worldnews, directed = TRUE)
 
 # Top 10 nodes by betweenness centrality
-top_betweenness <- data.frame(node_name = V(worldnews_igraph)$name, betweenness = V(worldnews_igraph)$betweenness) |> 
+top_betweenness <- data.frame(node_name = V(giantGraph_worldnews)$name, betweenness = V(giantGraph_worldnews)$betweenness) |> 
   dplyr::slice_max(order_by = betweenness, n = 10) |> 
   kableExtra::kable()
-
 top_betweenness
+
 ```
 
-## closeness
+### closeness # this is calculating outgoing paths
 
 ```{r}
-#| label: closeness centralities 
-
-# Calculate closeness centrality (outgoing paths)
-V(worldnews_igraph)$closeness <- closeness(worldnews_igraph, mode = "out")
+#| label: closeness
+### Closeness Centrality ###
+V(giantGraph_worldnews)$closeness <- igraph::closeness(giantGraph_worldnews, mode = "out")
 
 # Top 10 nodes by closeness centrality
-top_closeness <- data.frame(node_name = V(worldnews_igraph)$name, closeness = V(worldnews_igraph)$closeness) |> 
+top_closeness <- data.frame(node_name = V(giantGraph_worldnews)$name, closeness = V(giantGraph_worldnews)$closeness) |> 
   dplyr::slice_max(order_by = closeness, n = 10) |> 
   kableExtra::kable()
-
 top_closeness
+
 ```
 
-## eigenvector
+### eigenvector
 
 ```{r}
-#| label: eigenvector centrality
+#| label: eigenvector
+# Calculate eigenvector centrality and store it in the data.frame called 'centralities'
+# using 'igraph' because the code implemented in 'sna' is unreliable
 
-# Calculate eigenvector centrality
-V(worldnews_igraph)$eigenvector <- eigen_centrality(worldnews_igraph, directed = TRUE)$vector
+
+### Eigenvector Centrality ###
+V(giantGraph_worldnews)$eigenvector <- igraph::eigen_centrality(giantGraph_worldnews, directed = TRUE)$vector
 
 # Top 10 nodes by eigenvector centrality
-top_eigenvector <- data.frame(node_name = V(worldnews_igraph)$name, eigenvector = V(worldnews_igraph)$eigenvector) |> 
+top_eigenvector <- data.frame(node_name = V(giantGraph_worldnews)$name, eigenvector = V(giantGraph_worldnews)$eigenvector) |> 
   dplyr::slice_max(order_by = eigenvector, n = 10) |> 
   kableExtra::kable()
-
 top_eigenvector
+
+
 ```
 
-## k-core 
+### Burt's network constraint
 
 ```{r}
-#| label: k-core calculations and plot
+#| label: burt
+# Calculate Burt's network constraint and store it in the data.frame called 'centralities'
+# using 'igraph' because 'sna' doesn't have the function
+centralities_giantGraph_worldnews$netconstraint <- igraph::constraint(giantGraph_worldnews)
+# help(constraint) # Be careful with the interpretation for constraint: High constraint = redundant contacts, low constraint = acting as a broker
 
-# Calculate k-core decomposition
-V(worldnews_igraph)$kcore <- coreness(worldnews_igraph)
-
-# Plot the k-core decomposition results
-plot(worldnews_igraph,
-     vertex.size = V(worldnews_igraph)$kcore * 3,  # Size proportional to k-core
-     vertex.color = adjustcolor(V(worldnews_igraph)$kcore, alpha.f = .3),
-     vertex.label = NA,
-     edge.arrow.size = 0.3,
-     main = "K-core Decomposition of r/worldnews Network")
+centralities_giantGraph_worldnews |> 
+  dplyr::slice_min(order_by = netconstraint, n = 10) %>%
+  select(node_name, netconstraint) %>%
+  kableExtra::kable()
 
 ```
 
-## community dectection
+### K-core
+
+```{r}
+#| message: false
+#| warning: false
+#| label: k-core 1
+######################################################################################
+#
+# Part IV: Global Network Properties
+#
+######################################################################################
+# To go back to igraph analysis, don't forget detaching 'sna' and 'network' first
+# before recalling 'igraph'
+detach('package:statnet', unload = TRUE)
+library(igraph)
+
+## calculate k-cores
+kcore_worldnews <-
+  giantGraph_worldnews %>% coreness(.)
+kcore_worldnews ## show the results of k-core decomposition
+
+```
+
+```{r}
+#| label: k-core 2
+## Plot a graph colored by the k-core decomposition results
+giantGraph_worldnews %>%
+  plot(
+    .,
+    layout = layout_with_gem(.),
+    # layout = layout_with_sugiyama(.),
+    edge.arrow.size = .3,
+    vertex.size = 20,
+    vertex.label = V(giantGraph_worldnews)$name,
+    vertex.color = adjustcolor(graph.coreness(.), alpha.f = .3),
+    vertex.label.cex = .5,
+    vertex.label.color = 'black',
+    mark.groups = by(seq_along(graph.coreness(.)), graph.coreness(.), invisible),
+    mark.shape = 1 / 4,
+    mark.col = rainbow(length(unique(graph.coreness(
+      .
+    ))), alpha = .1),
+    mark.border = NA,
+  )
+
+```
 
 ```{r}
 #| label: community detection
+# Plot the number of clusters in the graph and their size
+# there are also other algorithms for this you may want to explore
+# below is using Newman-Girvan Algorithm (2003)
+# if communities do not make sense to you, replace with your choice
+# e.g., cluster_infomap, cluster_walktrap etc.
+cluster_worldnews <- giantGraph_worldnews %>% cluster_edge_betweenness()
+# cluster_hmn <- giantGraph_hmn %>% cluster_edge_betweenness()
+## you may see orange warning messages since the edge betweenness algorithm is not designed for a directed graph
+## but you'll be able to see the results anyway.
+## if you want to use a more appropriate algorithm for a directed graph, try:
+# cluster <- giantGraph_gpt %>% cluster_walktrap()
+# cluster <- giantGraph_hmn %>% cluster_walktrap()
 
-# Detect communities using the edge betweenness method
-worldnews_communities <- cluster_edge_betweenness(worldnews_igraph)
-
-# View the membership of nodes to communities
-membership(worldnews_communities)
-
-# Number of communities detected
-num_communities <- length(worldnews_communities)
-num_communities
-
-# Size of each community
-community_sizes <- sizes(worldnews_communities)
-community_sizes
 ```
-
-## modularity
 
 ```{r}
-#| label: community modularity
+#| label: community detection 2
+# Find the number of clusters
+membership(cluster_worldnews)   # affiliation list
+# membership(cluster_hmn)   # affiliation list
+length(cluster_worldnews) # number of clusters
+# length(cluster_hmn) # number of clusters
 
-# Calculate modularity of the detected communities
-modularity_score <- modularity(worldnews_communities)
-modularity_score
-
-# Interpretation of modularity score
-
-# the score is 0.5528658
+# Find the size of each cluster
+# Note that communities with one node are isolates, or have only a single tie
+sizes(cluster_worldnews)
+# sizes(cluster_hmn) 
 ```
-
-## visualize communities 
 
 ```{r}
-#| label: community vis
-
-# Plot the network with communities highlighted
-plot(worldnews_communities, worldnews_igraph,
-     vertex.size = V(worldnews_igraph)$kcore * 3,
-     vertex.label = NA,
-     edge.arrow.size = 0.3,
-     main = "Community Detection in r/worldnews Network")
+#| label: modularity
+# modularity measure
+modularity(cluster_worldnews)
+# modularity(cluster_hmn)
 ```
 
+Interpret the modularity score of your results of community detection.
+
+The modularity score is 0.2335753. Modularity is an assessment of the number of connections within a cluster and the comparison of how many connections would exist in a randomly distributed network. This modularity score means that the network ......
+
+```{r}
+#| label: community detection 3
+# Visualize clusters - that puts colored blobs around the nodes in the same community.
+# You may want to remove vertex.label=NA to figure out what terms are clustered.
+cluster_worldnews %>% plot(
+  .,
+  giantGraph_worldnews,
+  #layout = layout_nicely(giantGraph_gpt),
+  layout = layout_with_fr(giantGraph_worldnews),
+  edge.arrow.size = .3,
+  vertex.size = 10,
+  vertex.label = V(worldnews3_igraph)$name,
+  vertex.color = adjustcolor(membership(.), alpha.f = .3),
+  vertex.label.cex = .3,
+  vertex.label.color = 'black',
+  mark.groups = by(seq_along(membership(.)), membership(.), invisible),
+  mark.shape = 1/4,
+  mark.col = rainbow(length(.), alpha = .1),
+  mark.border = NA
+)
+
+```
