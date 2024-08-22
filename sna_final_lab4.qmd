@@ -1,0 +1,512 @@
+---
+title: "sna_final_lab1"
+format: html
+editor: visual
+---
+
+```{r}
+#| echo: false
+#| output: false
+#| message: false
+
+######################################################################################
+# Clear your global environment
+######################################################################################
+rm(list=ls())
+
+######################################################################################
+# Set current directory
+######################################################################################
+
+# Start by telling R where to look for your files.
+# From the menu, select "Session > Set Working Directory... > To Source File Location".
+
+# Alternatively, if you know the filename, you can uncomment the line below and run it.
+# setwd("replace this with the file path to your directory")
+
+# Please do one of the two alternatives above. This is where the files R produces will be stored.
+
+# Run this line of code to see if your current working directory has all of the files needed for this assignment
+list.files()
+
+######################################################################################
+# The first time you run this file, you will need to install several packages.
+# To do that, run the code section below. It may take up a couple of minutes.
+# You only need to install packages once, next time you should skip those lines.
+list.of.packages <- c("tidytext", "tidygraph","ggraph","igraph","tidyverse","topicmodels","textstem","udpipe", "tinytex")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+# Now run the lines below to load the packages you have installed.
+# You need to load packages every time you run the script or restart R.
+library(readr)
+library(tidytext)
+library(tidygraph)
+library(ggraph)
+library(igraph)
+library(tidyverse)
+library(topicmodels)
+library(textstem)
+library(udpipe)
+library(dplyr)
+
+# To check whether your R loads these packages, run the following code
+sessionInfo() ## check other attached packages. If readr, tidytext, tidygraph, ggraph, 
+              ## igraph, tidyverse, topicmodels and textstem are listed there, you're ready!
+```
+
+```{r}
+#| echo: false
+#| output: false
+#| message: false
+
+######################################################################################
+# Downloading NLP Procedure
+######################################################################################
+
+# download the udpipe model
+eng <- udpipe_download_model(language = "english")
+
+###########################################
+# Check confirm that the model has downloaded into your current working directory
+# Update the file name below to match the name of the file
+
+udmodel <- udpipe_load_model(file = "english-ewt-ud-2.5-191206.udpipe")
+###########################################
+```
+
+
+```{r}
+######################################################################################
+# Network Generation from the Text
+######################################################################################
+
+# combine the data into a tibble format
+text = tibble(gpt = gpt_text, human = human_text)
+
+text$gpt <- enc2utf8(text$gpt)
+text$human <- enc2utf8(text$human)
+
+# This step will use the "udpipe" package to label proper nouns in the text
+# Below labels text collected from ChatGPT
+gpt_entities <- udpipe_annotate(udmodel,text$gpt) |>
+  as.data.frame() |>
+  filter(upos=="PROPN") |>
+  group_by(lemma) |>
+  summarise(n=n())
+
+# This labels text collected from a collective intelligence source
+hmn_entities <- udpipe_annotate(udmodel, text$human) |> 
+  as.data.frame() |>
+  filter(upos=="PROPN") |> 
+  group_by(lemma) |> 
+  summarise(n=n())
+
+# This combines the text from the GPT and human sources into a dataframe
+# lemmatizes text (combines similar words) and removes duplicates.
+both_entities <- rbind(gpt_entities,hmn_entities) |>
+  mutate(lemma=tolower(lemma)) |>
+  select(lemma) |>
+  distinct()
+
+# create edgelist from text skipngrams
+# skip_ngrams are pairs of words that appear within k = 3 words of each other
+# df_skip produced a dataframe with four columns:
+# 1. name = source of text
+# 2. skip_1 = the first word in the pair
+# 3. skip_2 = the second word in the pair
+# 4. n = the number of co-occurrences in the entire source text
+df_skip <- text |> 
+  pivot_longer(cols= c(gpt, human)) |>
+  unnest_tokens(skipgrams, value, token = "skip_ngrams", n = 2, k = 3) |>  
+  separate_wider_delim(cols=skipgrams, 
+                       delim = " ", names = c("skip_1", "skip_2"),
+                       too_few = "align_start") |> 
+  mutate(skip_1 = textstem::lemmatize_words(skip_1),
+         skip_2 = textstem::lemmatize_words(skip_2)) |>
+  na.omit() |> 
+  filter(!skip_1 %in% stop_words$word) |>
+  filter(!skip_2 %in% stop_words$word) |>
+  filter(skip_1 %in% both_entities$lemma & skip_2 %in% both_entities$lemma) |>
+  filter(skip_1!= skip_2) |> 
+  count(name, skip_1, skip_2, sort = TRUE)
+
+######################################################################################
+
+# Now, we're going to take a break from R. Let's pause and clean up our data.
+# Run line 224 to generate a .csv file containing the formatted edgelist (pairs of proper
+# nouns that co-occur within 3 words of each other)
+
+write.csv(df_skip,"df_skip.csv")
+
+# If you don't feel like generating a .csv file, you can also view the dataframe in R.
+#View(df_skip)
+
+# Read the text in .csv and look for tokens (words) that should be removed.
+# Update the exclusions list below to include any proper nouns that aren't
+# appropriate for your network analysis.
+
+exclusions <- c("definition", "emerge", "interactive", "username", "baby") # excluded because they are unnecessary to "trends" in tiktok
+
+# Update df_skip to remove words in the exclusions list.
+df_skip <- df_skip |>
+  filter(!skip_1 %in% exclusions) |>
+  filter(!skip_2 %in% exclusions)
+
+# Take a look at df_skip to confirm that you have removed any inappropriate terms
+#View(df_skip)
+
+######################################################################################
+# Rerun the lines above (from "exclusions" to "View(df_skip)"), updating the list of exclusions each time, until you will get a desired result
+######################################################################################
+
+# generate a dataframe containing only gpt text
+df_gpt <-  df_skip |>
+  filter(name == "gpt")
+
+# generate a dataframe containing only human text
+df_hmn <-  df_skip |>
+  filter(name == "human")
+
+# create a combined graph object
+df_both <- df_skip |> 
+  select(skip_1,skip_2, name)
+
+# convert dataframe to long format to see all words
+df_long <- df_both |> 
+  pivot_longer(
+    cols = c(skip_1, skip_2), 
+    names_to = "source",
+    values_to = "word")
+
+# create a dataframe which labels the text source of the word (human, gpt, or both)
+vertex_labels <- df_long |> distinct(word) |>
+  left_join(distinct(df_long |> select(word,name) |> filter(name == "gpt"))) |>
+  left_join(distinct(df_long |> select(word,name) |> filter(name == "human")),by=join_by(word)) |>
+  mutate(source = case_when(is.na(name.x)~"human",is.na(name.y)~"gpt",T~"both")) |>
+  select(word,source)
+
+# generate a labeled graph
+# data_graph represents the combined artificial and collective intelligence semantic networks
+data_graph <- graph_from_data_frame(df_both, vertices = vertex_labels) |>
+  as_tbl_graph() |>
+  as.undirected()
+
+
+######################################################################################
+# Topic Modeling
+######################################################################################
+
+# first transform the text into a document-term matrix
+text_dtm <- text |>
+  pivot_longer(cols= c(gpt, human)) |>
+  unnest_tokens(word, value) |>
+  mutate(word = textstem::lemmatize_words(word)) |> # this line performs lemmatization, standardizing words
+  filter(!word %in% stop_words$word) |> # this line removes stop words (insignificant words for analysis)
+  count(name, word, sort = TRUE)|>
+  cast_dtm(name,word,n)
+
+# perform LDA analysis to group topics
+# the number of topics selected was k = 3
+text_lda <- LDA(text_dtm, k = 3, control = list(seed = 1234))
+
+# create the topic map
+# uses LDA to group words into topics
+topic_map <- augment(text_lda, data = text_dtm) |>
+  filter(count>2) |>
+  select(term, .topic) |>
+  distinct() |>
+  add_row(term=c("human","gpt"),.topic=0,.before=0) |>
+  group_by(term) |>
+  mutate(n_topics = row_number()) |>
+  filter(n_topics == 1) |>
+  ungroup()
+
+# gpt_graph represents the artificial intelligence network
+gpt_graph <- df_gpt |> 
+  # filter(n>=1) |>
+  select(skip_1,skip_2, name) |>
+  graph_from_data_frame() |>
+  as_tbl_graph() |>
+  left_join(topic_map, by = c("name" = "term")) |>
+  mutate(topic = `.topic` |> as_factor()) |>
+  # filter(topic==3) |>
+  as.undirected()
+
+# hmn_graph represents the collective intelligence network
+hmn_graph <- df_hmn |> 
+  # filter(n>2) |>
+  select(skip_1,skip_2, name) |>
+  graph_from_data_frame() |>
+  as_tbl_graph() |>
+  left_join(topic_map, by = c("name" = "term")) |>
+  mutate(topic = `.topic` |> as_factor()) |>
+  as.undirected()
+```
+
+## 1. Provide a high-level overview of the text you included in the data collection. **(5 points)**
+
+*Why did you choose this collection of text? Was there a specific, overarching question (intellectual or extracurricular curiosity) that motivated this collection of text?*
+
+My data is ... on TikTok, but specifically the content and trends made by people on the application. TikTok short-form video creation has led to easier access to other realms of the world for others. For example, many of the Olympic athletes have been giving insight on the behind the scenes at the Olympic Village by posting videos. Now, audiences can learn about the Olympic Dining Hall and the living conditions. Because TikTok's algorithm allows anyone to become viral, the content is always changing. I think TikTok is extremely influential in its fast-paced, accessible, and abundant content, which is why I was curious in collecting text about the app.
+
+## 2. What are the insights you hope to glean by looking at these text networks? **(2 points)**
+
+*For instance, which words do you think would have the highest degree centrality and why?*
+
+I hope to ... gain insight on what key points both the AI and Human networks will percieve of TikTok. I am certain that words like "politics," "fashion," "music," and "dance" will have the highest degree centrality because TikTok is a popular form of social media for politics, fashion, and music, dance. But as my collected text is specifically about the virality of content on TikTok, I am curious to see how large the network will be given that although TikTok is relatively new, the trends on the application are extremely fast, lasting for a singular week or 2 - 3 days.
+
+## 3. Are the graphs directed or undirected? **(2 points)**
+
+My graph is ... undirected.
+
+I know this because ... the relationship between the words do not have a direction and are instead simply linked by occurring within the same text file. I also checked that they are undirected using the code below.
+
+```{r}
+# check if the networks are directed or undirected
+is.directed(data_graph)
+is.directed(gpt_graph)
+is.directed(hmn_graph)
+```
+
+## 4. How many nodes and links does the AI network have? **(2 points)**
+
+The AI network has ... 79 nodes and 194 edges.
+
+```{r}
+# check the size of the networks
+vcount(data_graph) ## the number of nodes
+ecount(data_graph) ## the number of edges
+
+vcount(gpt_graph) ## the number of nodes
+ecount(gpt_graph) ## the number of edges
+
+vcount(hmn_graph) ## the number of nodes
+ecount(hmn_graph) ## the number of edges
+```
+
+::: {.callout-note style="color:blue"}
+Check how many nodes and edges exist in the network. Make sure that each network includes **around 50 or more nodes**. DO NOT collect data including more than 1,000 nodes, as it can slow down the lab’s code substantially. To increase or decrease the number of nodes, modify the amount of text gathered from each respective source. You may need to look at multiple related sources of collective intelligence or send multiple prompts to ChatGPT to gather more data.
+
+You can also modify k in unnest_tokens(skipgrams, value, token = "skip_ngrams", n = 2, k = 3) to increase the density of the network
+:::
+
+## 5. How many possible links could there be in the AI network based on the number of nodes? **(2 points)**
+
+The number of possible links the AI network could have is ... 3081 ((79\*78)/2).
+
+```{r}
+# Hint: the calculation differs for directed vs. undirected networks
+num_nodes <- vcount(gpt_graph)
+
+#number of possible links is n(n-1)/2
+(num_nodes*(num_nodes - 1))/2
+
+```
+
+## 6. What is the density of the AI network? **(2 points)**
+
+The density of the AI network is ... 0.06296657.
+
+```{r}
+# calculate the density of the networks
+graph.density(data_graph)
+graph.density(gpt_graph)
+graph.density(hmn_graph)
+```
+
+## 7. Briefly describe how your choice of dataset may influence your findings. **(5 points)**
+
+*What differences would you expect if you use different text sources (e.g., Reddit vs. Wikipedia) or a different topic?*
+
+By choosing my dataset this way.... I am choosing a very thorough and detailed crowdsourcing website by using Wikipedia. Information is shared by any person online editing Wikipedia, but everyone is editing the same page, meaning that inaccurate information will be overwritten by another person's correction. If I had used a site like Reddit or Quora, then each response to a question or query is individual. Everyone posts using their own accounts, meaning that there are more inaccuracies. However, a positive would be that there are more opinions and views on a crowdsourcing site like Reddit.
+
+## Save your data
+
+```{r}
+########################
+# Save your data       
+########################
+
+# The following command saves your R environment as RData
+# Please submit this RData on Canvas
+save.image('Lab1_Descriptive.RData')
+
+# Next time, you need to work on the same data, you can run the following command.
+# This allows you to recover and load the same data you found if you need to restart R
+# Make sure that you put the RData in your working directory
+load('Lab1_Descriptive.RData')
+# Save this .RData in case you would like to use it for future projects
+
+######################################################################################
+```
+
+# PART II: Network Visualization **(15 points)**
+
+In this part, using the data you are collecting, you will visualize the network and interpret these visualizations. Include a copy of the network plots you generate in your assignment.
+
+Complete the following by modifying the code below.
+
+## Basic Betwork Visualization
+
+Choose ONE: (1) Your collective intelligence graph OR **(2) Your artificial intelligence graph**, and complete the following questions based on your chosen graph.
+
+::: {.callout-important icon="false"}
+I have chosen to analyse the artificial intelligence graph. I have commented out code for the human network for readability.
+:::
+
+## 1. How many components are in this graph? **(1 points)**
+
+For the AI network, there are 4 components.
+
+```{r}
+# Calculate the number of components in the graph
+gpt_comp <- components(gpt_graph); gpt_comp
+# hmn_comp <- components(hmn_graph); hmn_comp
+```
+
+## 2. Create a visualization of the whole network and include it in your report (the first visualization). Then, in a paragraph, comment on the items described below. **(3 points)**
+
+*Describe the macro-level structure of your graph based on the visualization.* *For example, is the network composed of a giant, connected component, are there distinct sub-components, or are there isolated components? Can you recognize common features of the sub-components? Does this visualization give you any insight into the interaction patterns of your topic? If yes, what? If not, why? Note, if it's too hard to tell the macro-level structure from the visualization, experiment with different plot options (increase the node size, reduce the arrow size, etc.).*
+
+```{r}
+########################
+# Plotting   
+########################
+
+# For a more detailed tutorial of network visualization, see https://kateto.net/network-visualization
+# To open documentation in RStudio, run:
+# help("igraph.plotting")
+
+# Now, visualize the network - below, we plot the AI network as an example
+# If you want to visualize the collective intelligence network instead, just replace "gpt" with "hmn" everywhere
+
+## plot the original AI network
+plot(gpt_graph, vertex.size = 6, vertex.label = NA,
+     # Settings for layouts:
+     #      Running this command multiple times will produce slightly different networks,
+     #      based on the layout algorithm used. You can swap algorithms by uncommenting one of the
+     #      lines below. Which algorithm works best often depends on the data
+     layout = layout_nicely(gpt_graph)      ## Automated layout recommendation from iGraph
+     # layout = layout_with_fr(gpt_graph)    ## Fruchterman-Reingold algorithm
+     # layout = layout_with_dh(gpt_graph)    ## Davidson and Harel algorithm
+     # layout = layout_with_drl(gpt_graph)   ## Force-directed algorithm
+     # layout = layout_with_kk(gpt_graph)    ## Spring algorithm
+     # layout = layout_with_lgl(gpt_graph)   ## Large graph layout
+)
+```
+
+Based on my visualization, ... the AI network is mainly composed of one giant component. However, it is interesting to note that all of the 3 other components are connected dyads where two nodes are linked by one edge. Notably, there are no isolated components. There are three or four peripheral nodes on the outskirts of the node. Based on how most of the nodes are connected to one of the components, we can infer that the nodes, or "words" as we are graphing in this network, are closely connected with each other. This visualization also indicates that there are two nodes that have high degree centrality in the center of the cluster. It seems as most of the nodes in the giant component are at most 3 degrees separated from the center nodes, indicating about 6 degrees of separation among each other. For reference, the density of this graph is about 0.063.
+
+## 3. Create a second visualization, now using only the single largest component of the network (i.e., "giantGraph" if you work with the provided R code) and include it in your report. Then, in a paragraph, comment on the items described below. **(3 points)**
+
+*Again, if it's too hard to discern the structure of the component from the visualization, experiment with different plot options. Are there any differences between the first visualization and second one? If so, why? If not, why not? (If your whole network already had only one component to start with, the first and the second plots should be very similar. This is ok. Explain why the visualizations are similar or slightly different.)*
+
+```{r}
+# Take out the largest component from each graph
+
+# start with the AI network
+gpt_comp <- components(gpt_graph)
+giantGraph_gpt <- gpt_graph %>% 
+  induced.subgraph(., which(gpt_comp$membership == which.max(gpt_comp$csize)))
+
+# now repeat steps with the collective intelligence network
+# hmn_comp <- components(hmn_graph)
+# giantGraph_hmn <- hmn_graph %>% 
+#   induced.subgraph(., which(hmn_comp$membership == which.max(hmn_comp$csize)))
+
+## plot the largest component of the AI network
+plot(giantGraph_gpt, vertex.size = 6, vertex.label = NA,
+     # Settings for layouts:
+     #      Running this command multiple times will produce slightly different networks,
+     #      based on the layout algorithm used. You can swap algorithms by uncommenting one of the
+     #      lines below. Which algorithm works best often depends on the data
+     # layout = layout_nicely(giantGraph_gpt)      ## Automated layout recommendation from iGraph
+     # layout = layout_with_fr(giantGraph_gpt)    ## Fruchterman-Reingold algorithm
+      layout = layout_with_dh(giantGraph_gpt)    ## Davidson and Harel algorithm
+     # layout = layout_with_drl(giantGraph_gpt)   ## Force-directed algorithm
+     # layout = layout_with_kk(giantGraph_gpt)    ## Spring algorithm
+     # layout = layout_with_lgl(giantGraph_gpt)   ## Large graph layout
+)
+```
+
+Based on my visualization, ... using the layout with the Davidson and Harel algorithm, it is more noticeable that one node has the highest degree centrality which is a key actor in this network. A lot of the nodes are connected in loops. That is to say, there are many circles of nodes that are connected within the larger network. I can observe trios of nodes that are connected with each other that make up the entire graph. This layout and focus on the giant component makes it easier to see the edges and links among nodes.
+
+Compared to my first visualization, this one is ... similar but has its differences. A similarity is that there are around the same amount of peripheral nodes which are as well connected compared to the other nodes. Additionally, the degrees of separation for this visualization and the aforementioned visualization is also similar and few, with about 6 degrees of separation between any two nodes. A difference is that while the previous visualization shows 2 to 3 nodes at the center of the network, this graphic illustrates one particular node at the center of the network.
+
+## 4. Create a third visualization using a different 'igraph' layout option from (2) and (3) and include it in your report. Then, in a paragraph, comment on the items described below. **(3 points)**
+
+*Experiment with different visualization options to make your layout better or to add additional information to the plot. Explain your choice of visualization options. In a few sentences, describe what types of observations are easier to make using one plot or the other.*
+
+```{r}
+# Add your own code here
+
+plot(gpt_graph, vertex.size = 4, vertex.label = NA,
+      layout = layout_with_kk(gpt_graph)    ## Spring algorithm
+)
+
+```
+
+Using the Spring algorithm layout, it is easier to make observations on the distance of the outer nodes from key actors. I chose this layout because I found the organization interesting. In this visualization, there is a distinct cluster, but also nodes with longer edges that indicate a farther, more distanced connection to the center. It looks as if there are rings surrounding the center of the network that indicate equal distance from the key actors. This visualization is more similar to the first visualization, however, as it also shows two nodes that are the highest degree centrality. Just to note, changing the `vertex.size` can make it easier or harder to see the links due to the node sizes. Larger nodes make it more difficult to see the edges, but easier to see the nodes.
+
+## Topic Modeling
+
+Complete the following questions based on the same graph that you chose for the Basic Network Visualization portion of this assignment.
+
+## 1. Plot the combined graph with nodes colored based on which text it appeared in (i.e., "data_graph" if you work with the provided R code without adjustments). Then, in a paragraph, comment on the items described below. **(2 points)**
+
+*What do you observe about the words that exist in the collective intelligence text vs. the artificial intelligence text vs. both? Is there a lot of overlap across the text sources? Does this surprise you?*
+
+```{r}
+# Below,the network object is passing to the plot command using '|>'
+# plot the combined network with node color representing which text the word belongs to: collective, artificial, or both
+data_graph |>
+  as_tbl_graph() |>
+  ggraph(layout = 'fr')+
+  geom_edge_link2()+
+  geom_node_label(aes(label = name,colour=source), size = 2.5)+ # color nodes by source text
+  theme_void()
+```
+
+To preface, I changed the size of the labels to make it easier to see more nodes. Based on this visualization, I noticed that a lot of famous TikTok influencers overlapped across the text sources. Due to this network mapping an overview of the trends of TikTok, names like "Loren Gray" and "Zach King" were in both the AI and Collective Intelligence networks most likely because they are the people who start these trends. A lot of these names were famous from TikTok's former application, Musical.ly. Other than TikTokers, words like "challenge" and "hashtag" overlapped across the text sources, most likely because trends in TikTok stem from challenges, and hashtags are a wellknown way of reaching an audience who will create the same content, thus emerging a new trend. Other than these words, there wasn't much other overlap. A lot of the Collective Intelligence network contained words like "foodtok" and "ratatouille" which are both topics that trended a year ago. The AI network had words like "dance" and "creativity." I wasn't surprised by this conclusion, though, because the Wikipedia source was centered more on the concepts that had trended, while ChatGPT was centered more about the steps and content one could create to become viral and trending.
+
+## 2. Plot the collective intelligence network AND the artificial intelligence network with nodes colored based on topic (if you use the provided R code without any adjustments, the networks should have 3 topics each). Then, comment on the items described below. **(3 points)**
+
+*How are the words grouped together? What topics do you think each network contains?*
+
+```{r}
+# now we will analyze the separate artificial vs. collective intelligence semantic networks
+# plot the artificial intelligence semantic network with node color representing topic
+gpt_graph |>
+  as_tbl_graph() |>
+  ggraph(layout = 'fr')+
+  geom_edge_link2()+
+  geom_node_label(aes(label = name, colour=topic), size = 3) + # color nodes by topic
+  theme_void()
+
+# plot the collective intelligence semantic network with node color representing topic
+hmn_graph |>
+  as_tbl_graph() |>
+  ggraph(layout = 'fr')+
+  geom_edge_link2()+
+  geom_node_label(aes(label = name,colour=topic), size = 3)+
+  theme_void()
+```
+
+For both the graphs, there are a lot of words that do not fit a topic. For the chatGPT graph, one of the topics happens to only have one node, which is "content", which fascinatingly is also the key actor in the whole network. That is logical since all of the TikTok is content. Another topic contained a lot of names of TikTokers like "Bella" and "Dixie" and "Charlie" which could mean that that topic is people that had been viral at one point. The last topic has words like "food" "song" and "viral" which indicates that they are grouped by types of content that trends. For the Wikipedia, collective intelligence network, one of the topic is "content" again. The green topic could be about concepts based on dates or places, because at the words include "december", "january", "march", and "school" and "institute." The red topic could be grouped based on the history of tiktok trends, starting with the topic including words like "challenge" and "project" and people like "zach" and "loren."
+
+
+
+## 3. Export and Submit 3 Files
+
+Check your submission for grammar - points may be deducted for lack of clarity.
+
+Click 'Render' button at the top of the screen, or press cmd + shift + k. Note. It might take some time for you computer to render this document as a PDF, since it will be running all code chunks.
+
+Deliverables to submit on Canvas:
+
+1.  Your report as a .pdf file
+2.  Your code as a .qmd file
+3.  Your data as a .RData file
+
+Please upload each file separately -- do not upload as a zip file! *(Please)*

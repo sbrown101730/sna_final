@@ -1,0 +1,403 @@
+---
+title: "sna_central"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+#| echo: true
+#| output: false
+#| message: false
+#| label: load packages
+
+# Lab 2: Descriptive Network Analysis
+
+# Start with a clear environment
+rm(list=ls())
+
+######################################################################################
+# The first time you run this file, you will need to install several packages.
+# To do that, run the code section below. It may take a couple minutes.
+# You only need to install packages once, next time you should skip the install lines.
+list.of.packages <- c("robustbase","igraph","statnet", "kableExtra", "poweRlaw")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+# You need to load packages every time you run the script or restart R.
+library(dplyr)
+library(igraph)
+library(ggplot2)
+library(poweRlaw)
+# To check whether your R loads these packages, run the following code
+sessionInfo() ## check other attached packages. If igraph is listed there, you're ready!
+```
+
+```{r}
+#| echo: true
+#| output: false
+#| message: false
+
+# rm(list=ls())
+# 
+# # Lab 3:
+# # Exponential Random Graph Models (ERGMs)
+# 
+# # Clear your environment
+# rm(list=ls())
+
+# Install packages below if you do not have them:
+# -------------------------------------------------
+if (!"statnet" %in% installed.packages()) install.packages("statnet") # For fitting ERGMs
+if (!"igraph" %in% installed.packages()) install.packages("igraph") # For network plotting
+if (!"texreg" %in% installed.packages()) install.packages("texreg") # For printing "nicer" model output
+
+library(statnet)
+library(readr)
+
+# -------------------------------------------------------------------------------------------------
+# Set the working directory
+# Session > Set Working Directory > To Source File Location
+# -------------------------------------------------------------------------------------------------
+list.files() # List the files in the current working directory to see if you're in the right directory
+
+```
+
+```{r}
+#| echo: true
+#| output: false
+#| message: false
+#| label: load data
+
+library(dplyr) 
+
+set.seed(5)
+
+# read tsv
+hyperlink <- read_tsv("data/soc-redditHyperlinks-body.tsv") %>%
+  janitor::clean_names() %>%
+  select(source_subreddit, target_subreddit)
+  
+
+```
+
+```{r}
+#| echo: false
+#| output: false
+#| message: false
+
+# View the first rows of the edgelist to make sure it imported correctly:
+head(hyperlink)
+# Convert the edgelist to a network object in statnet format:
+hyperlink_net <- as.network.matrix(hyperlink, matrix.type = "edgelist") 
+
+# hyperlink_net |> 
+#   network::set.edge.attribute("sentiment", value = hyperlink$sentiment)
+
+# View a summary of the network object
+hyperlink_net
+
+```
+
+```{r}
+# ----------------------------------------------------------------------------
+# Visualize networks
+# ----------------------------------------------------------------------------
+library('igraph') # Ignore messages on any objects that are masked
+
+# Set default plot options
+igraph_options(vertex.size = 5, vertex.color = 'grey', # vertex.size changes the size of nodes; vertex.color changes the color of nodes
+               edge.color='gray80', edge.arrow.size=.1, # edge.color changes the color of ties; edge.arrow.size changes the size of tie arrow heads
+               vertex.label = NA
+               )                       # vertex.label = NA specifies not to display vertex labels in the plot
+
+# Plot the Advice network
+hyperlink_igraph <- graph_from_adjacency_matrix(as.matrix.network(hyperlink_net)) # make an igraph network object from statnet network object
+
+# hyperlink_igraph <- set_edge_attr(hyperlink_igraph, "sentiment", value = hyperlink$sentiment)
+
+count_components(hyperlink_igraph)
+net_layout <- layout_with_fr(hyperlink_igraph) # Calculates and stores a spring-embedded layout
+                                           # We will re-use this same layout for each plot, so nodes are always in the same place
+plot(hyperlink_igraph, layout=net_layout, edge.color= "blue")
+```
+
+```{r}
+#| label: giant component
+
+hyper_comp <- igraph::components(hyperlink_igraph)
+giantGraph_hyper <- hyperlink_igraph %>%
+  induced_subgraph(., which(hyper_comp$membership == which.max(hyper_comp$csize)))
+
+plot(giantGraph_hyper, layout=net_layout, edge.color= "blue")
+# vcount(gpt_graph) ## the number of nodes/actors/users
+# ecount(gpt_graph) ## the number of edges
+```
+
+```{r}
+#| message: false
+#| warning: false
+#| label: centrality
+######################################################################################
+#
+# Part III: Local Network Properties
+#
+######################################################################################
+
+# For this part, you switch 'igraph' to 'sna' package because we are going to use 
+# some functions that only are available in sna package
+# As a first step, create a 'sna' graph object from an 'igraph' object
+sna_hyperlink <-
+  igraph::as_adjacency_matrix(giantGraph_hyper, sparse = FALSE) %>% network::as.network.matrix()
+
+# this detaching is a necessary step since the two packages have some same function names
+# R is often confused
+detach('package:igraph')
+library(statnet)
+
+# We will compute centralities based on 'network' package
+# First, create a dataframe to store the centrality information
+centralities_hyper <- data.frame('node_name' = as.character(network.vertex.names(sna_hyperlink)))
+
+```
+
+### degree
+
+```{r}
+#| label: degree
+# Calculate degree centrality for the nodes in our undirected graph
+centralities_hyper$degree <- degree(sna_hyperlink, cmode = 'freeman')  
+# this gives you the total degree and we divide by 2 because we have an undirected graph where indegree=outdegree=total degree/2
+
+centralities_hyper |> 
+  dplyr::slice_max(order_by = degree, n = 10) |> # function selects top n = 5 rows, ordered by degree
+  select(node_name, degree) %>%
+  kableExtra::kable() ## this functions renders nice table
+
+## note, that you might get more than 5 rows, if multiple nodes have the same degree
+```
+
+### betweenness
+
+```{r}
+#| label: betweenness
+# Calculate betweenness centrality and store it in the data.frame called 'centralities'
+centralities_hyper$betweenness <- betweenness(sna_hyperlink)
+
+centralities_hyper |> 
+  dplyr::slice_max(order_by = betweenness, n = 10) %>%
+  select(node_name, betweenness) %>%
+  kableExtra::kable()
+```
+
+### closeness
+
+```{r}
+#| label: closeness
+# Calculate closeness centrality and store it in the data.frame called 'centralities'
+# using 'igraph' because the code implemented in 'sna' is unreliable
+# Note, using "igraph::" allows calling for any igraph function without loading the package
+centralities_hyper$closeness <-
+  igraph::closeness(
+    giantGraph_hyper, 
+    mode = 'all'
+    )
+
+ ## write your code here to select top 5 nodes
+ centralities_hyper |> 
+   dplyr::slice_max(order_by = closeness, n = 10) %>%
+   select(node_name, closeness) %>%
+   kableExtra::kable()
+# (just copy it from the previous chunk, but change the name of a column)
+```
+
+### eigenvector
+
+```{r}
+#| label: eigenvector
+# Calculate eigenvector centrality and store it in the data.frame called 'centralities'
+# using 'igraph' because the code implemented in 'sna' is unreliable
+centralities_hyper$eigen <-
+  igraph::eigen_centrality(giantGraph_hyper)$vector
+
+centralities_hyper |> 
+  dplyr::slice_max(order_by = eigen, n = 10) %>%
+  select(node_name, eigen) %>%
+  kableExtra::kable()
+
+```
+
+### Burt's network constraint
+
+```{r}
+#| label: burt
+# Calculate Burt's network constraint and store it in the data.frame called 'centralities'
+# using 'igraph' because 'sna' doesn't have the function
+centralities_hyper$netconstraint <- igraph::constraint(giantGraph_hyper)
+# help(constraint) # Be careful with the interpretation for constraint: High constraint = redundant contacts, low constraint = acting as a broker
+
+centralities_hyper |> 
+  dplyr::slice_min(order_by = netconstraint, n = 10) %>%
+  select(node_name, netconstraint) %>%
+  kableExtra::kable()
+
+```
+
+```{r}
+
+# in degree
+centralities_hyper$in_degree <- degree(sna_hyperlink, cmode = 'indegree')
+
+centralities_hyper |> 
+  dplyr::slice_max(order_by = in_degree, n = 10) %>%
+  select(node_name, in_degree) %>%
+  kableExtra::kable()
+
+centralities_hyper$out_degree <- degree(sna_hyperlink, cmode = 'outdegree')
+
+centralities_hyper |> 
+  dplyr::slice_max(order_by = out_degree, n = 10) %>%
+  select(node_name, out_degree) %>%
+  kableExtra::kable()
+
+```
+
+### K-core
+
+## What is k-core? **(3 points)**
+
+```{r}
+#| message: false
+#| warning: false
+#| label: k-core
+######################################################################################
+#
+# Part IV: Global Network Properties
+#
+######################################################################################
+# To go back to igraph analysis, don't forget detaching 'sna' and 'network' first
+# before recalling 'igraph'
+detach('package:statnet', unload = TRUE)
+library(igraph)
+
+## calculate k-cores
+kcore_hyper <-
+  giantGraph_hyper %>% graph.coreness(.)
+kcore_hyper ## show the results of k-core decomposition
+# kcore_hmn <-
+#   giantGraph_hmn %>% graph.coreness(.)
+# kcore_hmn ## show the results of k-core decomposition
+
+```
+
+```{r}
+#| label: k-core 2
+## Plot a graph colored by the k-core decomposition results
+giantGraph_hyper %>%
+  plot(
+    .,
+    layout = layout_with_gem(.),
+    # layout = layout_with_sugiyama(.),
+    edge.arrow.size = .3,
+    vertex.size = 20,
+    vertex.label = V(giantGraph_hyper)$name,
+    vertex.color = adjustcolor(graph.coreness(.), alpha.f = .3),
+    vertex.label.cex = .5,
+    vertex.label.color = 'black',
+    mark.groups = by(seq_along(graph.coreness(.)), graph.coreness(.), invisible),
+    mark.shape = 1 / 4,
+    mark.col = rainbow(length(unique(graph.coreness(
+      .
+    ))), alpha = .1),
+    mark.border = NA,
+  )
+
+# giantGraph_hmn %>%
+#   plot(
+#     .,
+#     layout = layout_with_gem(.),
+#     # layout = layout_with_sugiyama(.),
+#     edge.arrow.size = .3,
+#     vertex.size = 4,
+#     vertex.label = NA,
+#     vertex.color = adjustcolor(graph.coreness(.), alpha.f = .3),
+#     vertex.label.cex = .5,
+#     vertex.label.color = 'black',
+#     mark.groups = by(seq_along(graph.coreness(.)), graph.coreness(.), invisible),
+#     mark.shape = 1 / 4,
+#     mark.col = rainbow(length(unique(graph.coreness(
+#       .
+#     ))), alpha = .1),
+#     mark.border = NA
+#   )
+```
+
+```{r}
+#| label: community detection
+# Plot the number of clusters in the graph and their size
+# there are also other algorithms for this you may want to explore
+# below is using Newman-Girvan Algorithm (2003)
+# if communities do not make sense to you, replace with your choice
+# e.g., cluster_infomap, cluster_walktrap etc.
+cluster_hyper <- giantGraph_hyper %>% cluster_edge_betweenness()
+# cluster_hmn <- giantGraph_hmn %>% cluster_edge_betweenness()
+## you may see orange warning messages since the edge betweenness algorithm is not designed for a directed graph
+## but you'll be able to see the results anyway.
+## if you want to use a more appropriate algorithm for a directed graph, try:
+# cluster <- giantGraph_gpt %>% cluster_walktrap()
+# cluster <- giantGraph_hmn %>% cluster_walktrap()
+
+```
+
+```{r}
+#| label: community detection 2
+# Find the number of clusters
+membership(cluster_hyper)   # affiliation list
+# membership(cluster_hmn)   # affiliation list
+length(cluster_hyper) # number of clusters
+# length(cluster_hmn) # number of clusters
+
+# Find the size of each cluster
+# Note that communities with one node are isolates, or have only a single tie
+sizes(cluster_hyper)
+# sizes(cluster_hmn) 
+```
+
+```{r}
+#| label: modularity
+# modularity measure
+modularity(cluster_hyper)
+# modularity(cluster_hmn)
+```
+
+Interpret the modularity score of your results of community detection.
+
+The modularity score is 0.4777396. Modularity is an assessment of the number of connections within a cluster and the comparison of how many connections would exist in a randomly distributed network. This modularity score means that while the relationship of nodes within a cluster is not the strongest, they still are pretty well connected/related. Based on this network, we can see that the 12 communities have be partitioned decently. A look into the clusters show that there are no communities with a single node.
+
+```{r}
+#| label: community detection 3
+# Visualize clusters - that puts colored blobs around the nodes in the same community.
+# You may want to remove vertex.label=NA to figure out what terms are clustered.
+cluster_hyper %>% plot(
+  .,
+  giantGraph_hyper,
+  #layout = layout_nicely(giantGraph_gpt),
+  layout = layout_with_fr(giantGraph_hyper),
+  edge.arrow.size = .3,
+  vertex.size = 10,
+  vertex.label = V(giantGraph_hyper)$name,
+  vertex.color = adjustcolor(membership(.), alpha.f = .3),
+  vertex.label.cex = .3,
+  vertex.label.color = 'black',
+  mark.groups = by(seq_along(membership(.)), membership(.), invisible),
+  mark.shape = 1/4,
+  mark.col = rainbow(length(.), alpha = .1),
+  mark.border = NA
+)
+
+```
+
+```{r}
+save.image('sna_final_centralities.RData')
+```

@@ -1,0 +1,159 @@
+---
+title: "sna-test"
+author: "Katie Lam"
+date: today 
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+# load data and packages
+
+```{r}
+#| echo: false
+#| output: false
+#| message: false
+
+rm(list=ls())
+
+# Lab 3:
+# Exponential Random Graph Models (ERGMs)
+
+# Clear your environment
+rm(list=ls())
+
+# Install packages below if you do not have them:
+# -------------------------------------------------
+if (!"statnet" %in% installed.packages()) install.packages("statnet") # For fitting ERGMs
+if (!"igraph" %in% installed.packages()) install.packages("igraph") # For network plotting
+if (!"texreg" %in% installed.packages()) install.packages("texreg") # For printing "nicer" model output
+
+library(statnet)
+library(readr)
+
+# -------------------------------------------------------------------------------------------------
+# Set the working directory
+# Session > Set Working Directory > To Source File Location
+# -------------------------------------------------------------------------------------------------
+list.files() # List the files in the current working directory to see if you're in the right directory
+
+```
+
+
+```{r}
+#| echo: false
+#| output: false
+#| message: false
+#| label: load data
+
+library(dplyr) 
+library(tidyverse)
+
+set.seed(3)
+
+# read tsv
+hyperlink_large <- read_tsv("data/soc-redditHyperlinks-body.tsv")
+
+# read csv
+popularity_large <- read_csv("data/subreddits_public.csv")
+
+popularity_clean <- popularity_large %>%
+  mutate(subreddit_name = str_to_lower(subreddit_name))
+
+askreddit_large <- hyperlink_large %>%
+  janitor::clean_names() %>%
+  filter(source_subreddit == "askreddit" | target_subreddit == "askreddit") %>%
+  group_by(source_subreddit, target_subreddit) %>%
+  summarize(
+    source_subreddit = first(source_subreddit),
+    target_subreddit = first(target_subreddit),
+    sentiment = mean(link_sentiment)
+  ) %>%
+  ungroup()
+
+askreddit <- sample_n(askreddit_large, 100) %>%
+  unique()
+
+popularity <- popularity_clean %>%
+  filter(subreddit_name %in% askreddit$source_subreddit | 
+           subreddit_name %in% askreddit$target_subreddit) %>%
+  select(subreddit_name, subscribers_count) %>%
+  mutate(
+    subscribers_count = as.numeric(subscribers_count),
+    size = case_when(
+      subscribers_count <= 10000 ~ "small",
+      subscribers_count <= 50000 ~ "medium",
+      subscribers_count > 50000 ~ "large"
+    )
+  )
+
+```
+
+
+# 1. askreddit
+```{r}
+#| echo: false
+#| output: false
+#| message: false
+
+# View the first rows of the edgelist to make sure it imported correctly:
+head(askreddit)
+# Convert the edgelist to a network object in statnet format:
+askreddit_net <- as.network.matrix(askreddit, matrix.type = "edgelist") 
+
+askreddit_net |> 
+  network::set.edge.attribute("sentiment", value = askreddit$sentiment)
+
+askreddit_net |>
+  network::set.vertex.attribute("num_subs", value = popularity$subscribers_count)
+
+askreddit_net |>
+  network::set.vertex.attribute("size", value = popularity$size)
+
+# View a summary of the network object
+askreddit_net
+
+# Check vertex attribute
+network::get.vertex.attribute(askreddit_net,"size")
+
+# Check edge attribute
+network::get.edge.attribute(askreddit_net,"sentiment")
+
+```
+
+
+```{r}
+# ----------------------------------------------------------------------------
+# Visualize networks
+# ----------------------------------------------------------------------------
+library('igraph') # Ignore messages on any objects that are masked
+
+# Set default plot options
+igraph_options(vertex.size = 2, vertex.color = 'grey', # vertex.size changes the size of nodes; vertex.color changes the color of nodes
+               edge.color='gray80', edge.arrow.size=.1, # edge.color changes the color of ties; edge.arrow.size changes the size of tie arrow heads
+               vertex.label = NA)                       # vertex.label = NA specifies not to display vertex labels in the plot
+
+# Plot the Advice network
+askreddit_igraph <- graph.adjacency(as.matrix.network(askreddit_net), weighted = TRUE) # make an igraph network object from statnet network object
+
+askreddit_igraph <- set_edge_attr(askreddit_igraph, "sentiment", value = askreddit$sentiment)
+
+count_components(askreddit_igraph)
+net_layout <- layout_with_fr(askreddit_igraph) # Calculates and stores a spring-embedded layout
+                                           # We will re-use this same layout for each plot, so nodes are always in the same place
+plot(askreddit_igraph, layout=net_layout, edge.color= "blue", vertex.label = NA)
+```
+
+
+```{r}
+# Plot the Advice network with node coloring based on sex
+E(askreddit_igraph)$color = ifelse(E(askreddit_igraph)$sentiment > 0, "green", "red")
+
+plot(askreddit_igraph, layout=net_layout, vertex.label = V(askreddit_igraph)$name, vertex.label.cex = 1)
+```
+
+
+# 2. drama 
+
+# 3. iama
+
