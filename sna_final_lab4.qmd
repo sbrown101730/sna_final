@@ -5,6 +5,11 @@ editor: visual
 ---
 
 ```{r}
+# blad
+```
+
+
+```{r}
 #| echo: false
 #| output: false
 #| message: false
@@ -74,7 +79,6 @@ eng <- udpipe_download_model(language = "english")
 udmodel <- udpipe_load_model(file = "english-ewt-ud-2.5-191206.udpipe")
 ###########################################
 ```
-
 
 ```{r}
 ######################################################################################
@@ -494,8 +498,6 @@ hmn_graph |>
 ```
 
 For both the graphs, there are a lot of words that do not fit a topic. For the chatGPT graph, one of the topics happens to only have one node, which is "content", which fascinatingly is also the key actor in the whole network. That is logical since all of the TikTok is content. Another topic contained a lot of names of TikTokers like "Bella" and "Dixie" and "Charlie" which could mean that that topic is people that had been viral at one point. The last topic has words like "food" "song" and "viral" which indicates that they are grouped by types of content that trends. For the Wikipedia, collective intelligence network, one of the topic is "content" again. The green topic could be about concepts based on dates or places, because at the words include "december", "january", "march", and "school" and "institute." The red topic could be grouped based on the history of tiktok trends, starting with the topic including words like "challenge" and "project" and people like "zach" and "loren."
-
-
 
 ## 3. Export and Submit 3 Files
 
