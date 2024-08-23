@@ -1,6 +1,6 @@
 ---
-title: "todayilearned_ergm"
-author: "Katie Lam"
+title: "todayilearned_centralities"
+author: "siya brown"
 date: today 
 format: html
 editor_options: 
